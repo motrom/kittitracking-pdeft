@@ -1,15 +1,17 @@
-#!/usr/bin/env python2
 # -*- coding: utf-8 -*-
 """
-last mod 4/26/19
-
 approximates ground using lidar points
 ground is parameterized as grid of tiles, each of which is a flat plane
 __main__ code saves ground in .npy files for use by detectors/trackers
+
+This is not a remotely efficient approach to ground estimation, though it
+is more accurate than a single plane in some cases. The obvious speed-up is to
+not recalculate the same tiles each timestep -- given that the car only moves fast enough
+to reach a small set of new tiles. Or you could make a map...
 """
 
 import numpy as np
-from config import grndstep, grndstart, grndlen, floor
+from grid import grndstep, grndstart, grndlen, floor
 
 max_road_slope = .1 # tangent
 # slope ~= .15 , current highest kitti slope seems to be .998
@@ -263,34 +265,29 @@ def planes2Transforms(groundplanes):
 
 
 """
-get ground data for kitti tracking set
+estimate ground for kitti tracking set, using scenes dictated in example
 """
 if __name__ == '__main__':
     from os.path import isfile
     from calibs import calib_extrinsics
-    from config import sceneranges
-    from config import calib_map_training as calib_map
     
-    lidar_files = 'Data/tracking_velodyne/training/{:04d}/{:06d}.bin'
-    ground_files = 'Data/tracking_ground/training/{:02d}f{:06d}.npy'
+    from runconfigs.example import lidar_files, ground_files, scenes   
     
-    for sceneidx in range(0,10):
-        calib_idx = calib_map[sceneidx]
+    for scene_idx, startfileidx, endfileidx, calib_idx in scenes:
         calib_extrinsic = calib_extrinsics[calib_idx].copy()
-        calib_extrinsic[2,3] += 1.65
-        print("doing scene {:d}".format(sceneidx))
-        startfileidx, endfileidx = sceneranges[sceneidx]
+        calib_extrinsic[2,3] += 1.65 # rough camera height
+        print("making ground for scene {:d}".format(scene_idx))
         for fileidx in range(startfileidx, endfileidx):
             # load relevant data
-            lidarfile = lidar_files.format(sceneidx, fileidx)
+            lidarfile = lidar_files.format(scene_idx, fileidx)
             if not isfile(lidarfile):
-                print("couldn't find {:d}/{:d}, skipping".format(sceneidx,fileidx))
+                print("couldn't find {:d}/{:d}, skipping".format(scene_idx,fileidx))
                 continue
             data = np.fromfile(lidarfile, dtype=np.float32).reshape((-1,4))[:,:3]
             # get ground
             full_data_xyz = data.dot(calib_extrinsic[:3,:3].T)
             ground = getGround(full_data_xyz + calib_extrinsic[:3,3])
-            np.save(ground_files.format(sceneidx, fileidx), ground)
+            np.save(ground_files.format(scene_idx, fileidx), ground)
             
          
             
@@ -301,28 +298,24 @@ if False:
     from imageio import imread
     from cv2 import imshow, waitKey
 
-    from config import grnd2checkgrid
+    from grid import grnd2checkgrid
     from plotStuff import plotImgKitti
     from calibs import calib_extrinsics, calib_projections, view_by_day
-    from config import sceneranges
-    from config import calib_map_training as calib_map
     
     lidar_files = 'Data/tracking_velodyne/training/{:04d}/{:06d}.bin'
     ground_files = 'Data/tracking_ground/training/{:02d}f{:06d}.npy'
     img_files = 'Data/tracking_image/training/{:04d}/{:06d}.png'
     scene_idx = 1
-    
+    startfileidx = 181
+    endfileidx = 447
+    calib_idx = 0
+
     def grayer(img): return ((img.astype(float)-128)*.95 + 128).astype(np.uint8)
     
-    startfileidx, endfileidx = sceneranges[scene_idx]
-    #startfileidx = 0
-    #endfileidx = 89
-    calib_idx = calib_map[scene_idx]
     calib_extrinsic = calib_extrinsics[calib_idx].copy()
     calib_extrinsic[2,3] += 1.65
     calib_projection = calib_projections[calib_idx]
     calib_intrinsic = calib_projection.dot(np.linalg.inv(calib_extrinsic))
-    
     view_angle = view_by_day[calib_idx]
         
     for fileidx in range(startfileidx, endfileidx):

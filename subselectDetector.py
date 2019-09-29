@@ -14,7 +14,7 @@ from singleIntegrator.py
 """
 import numpy as np
 from config import grnd2checkgrid, grndstart, grndstep, grndlen
-from singleIntegrator import soPositionDistribution
+from singleIntegrator import soPositionDistribution, ft_pexist
 from occupancygrid import mapNormal2Subgrid
 
 
@@ -32,11 +32,12 @@ def objectEntropy(obj, existprob):
     return existprob*distentropy + (1 - existprob)*existprob*_existentropymultiplier
 
 
-def subselectDetector(objects, objecthypweights, occupancy, visibility, empty, ntiles):
+def subselectDetector(objects, objecthypweights, occupancy, visibility, empty, ratio):
+    ntiles = int(np.prod(occupancy.shape) * ratio)
     tilescores = occupancy.copy()
     for objidx in range(len(objects)):
         obj = objects[objidx]
-        objectexistprob = obj[42] * objecthypweights[objidx]
+        objectexistprob = obj[ft_pexist] * objecthypweights[objidx]
         if objectexistprob < 1e-3: continue
         objuncertainty = objectEntropy(obj, objectexistprob)
         positiondist = soPositionDistribution(obj)

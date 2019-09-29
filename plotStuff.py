@@ -15,6 +15,9 @@ from matplotlib.colors import hsv_to_rgb
 
 
 size = 320
+extent = ((0.,60.), (-30.,30.))
+
+bevTM = np.array(((-320./30,0,640), (0,-320./30,320)))
 
 def reference(x, y):
     return size*2-x*size, size-y*size
@@ -164,6 +167,31 @@ def plotRectangle(img, rect, color):
     include &= abs(s*x_off - c*y_off) < w+.5/size
     img[x_min:x_max, y_min:y_max][include] = color
 
+def plotRectangleEdges(img, rect, color):
+    x,y,angle,l,w = rect
+    c = cos(angle)
+    s = sin(angle)
+    px = []
+    py = []
+    x = 640 - 320/30.*x
+    y = 320 - 320/30.*y
+    l *= 320/30.
+    w *= 320/30.
+    dx,dy = drawLine(x+c*l-s*w, y+s*l+c*w, x+c*l+s*w, y+s*l-c*w)
+    px += dx; py += dy
+    dx,dy = drawLine(x+c*l-s*w, y+s*l+c*w, x-c*l-s*w, y-s*l+c*w)
+    px += dx; py += dy
+    dx,dy = drawLine(x-c*l+s*w, y-s*l-c*w, x+c*l+s*w, y+s*l-c*w)
+    px += dx; py += dy
+    dx,dy = drawLine(x-c*l+s*w, y-s*l-c*w, x-c*l-s*w, y-s*l+c*w)
+    px += dx; py += dy
+    px = np.array(px)
+    py = np.array(py)
+    for offx, offy in ((-1,0),(1,0),(0,-1),(0,1),(0,0)):
+        include = (px+offx>=0)&(py+offy>=0)&(px+offx<img.shape[0])&(py+offy<img.shape[1])
+        img[px[include]+offx, py[include]+offy] *= 1-color[3]
+        img[px[include]+offx, py[include]+offy] += color
+
 def plotPoints(img, x, y, pointshape, color):
     for off_x, off_y in pointshape:
         img[x+off_x, y+off_y] = color
@@ -206,6 +234,8 @@ def grayer(img):
 
 
 ## added may 2019
+#from imageio import imread
+#cartop = imread('/home/m2/Documents/kittitrackdetect/cartop.png')[]
 def plotImgKitti(view_angle):
     img = np.zeros((640, 640, 4), dtype=float)
     img[:,:,:3] = 255.9
