@@ -5,21 +5,23 @@ This one uses saved PointRCNN detections for the first 10 scenes of the
 kitti tracking training dataset.
 """
 
-lidar_files = '/home/m2/Data/kitti/tracking_velodyne/training/{:04d}/{:06d}.bin'
+lidar_files = ('/home/motrom/Downloads/kitti_devkit/tracking/training/velodyne/'+
+               '{:04d}/{:06d}.bin')
 
-gt_files = '/home/m2/Data/kitti/tracking_gt/{:04d}.txt'
+gt_files = '/home/motrom/Downloads/kitti_devkit/tracking/training/label_02/{:04d}.txt'
 
-oxt_files = '/home/m2/Data/kitti/oxts/{:04d}.txt'
+oxt_files = '/home/motrom/Downloads/kitti_devkit/tracking/training/oxts/{:04d}.txt'
 
-ground_files = '/home/m2/Data/kitti/tracking_ground/training/{:02d}f{:06d}.npy'
+ground_files = '/home/motrom/Downloads/kitti_devkit/trackingground/training/{:02d}f{:06d}.npy'
 
-save_estimates = True
+save_estimates = False
 estimate_files = '/home/m2/Data/kitti/estimates/trackresultsPRC/{:02d}f{:04d}.npy'
 
 display_video = True
 save_video = False
 video_file = 'results.mp4'
-img_files = '/home/m2/Data/kitti/tracking_image/training/{:04d}/{:06d}.png'
+img_files =  ('/home/motrom/Downloads/kitti_devkit/tracking/training/image_02'+
+              '/{:04d}/{:06d}.png')
 
 """
 (scene number, starting file number, ending file number, calibration idx (aka date))

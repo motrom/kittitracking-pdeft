@@ -1,26 +1,12 @@
 #!/usr/bin/env python2
 # -*- coding: utf-8 -*-
 """
-last mod 7/1/19
-using opencv's warpAffine
-
 tools for manipulating grids
+using opencv's warpAffine
 """
 import numpy as np
 from cv2 import warpAffine, BORDER_TRANSPARENT, BORDER_CONSTANT
 from cv2 import INTER_LINEAR, INTER_CUBIC, WARP_INVERSE_MAP
-
-tile_size = .5
-tile_start = (-10., -50.)
-occupancygrid_shape = (140, 200)
-
-ntx, nty = occupancygrid_shape
-grid = np.mgrid[:ntx, :nty]
-grid = grid.transpose((1,2,0)).astype(float)
-#grid += .5
-grid *= tile_size
-grid += tile_start
-
 
 def updateGridwGrid(priorgrid, msmtgrid, viewedgrid, msmt_confusion_matrix):
     """
@@ -50,12 +36,10 @@ def reOrientGrid(priorgrid, transform, initial_val, gridstep, gridstart, gridlen
     This function does an approximation by finding the old tiles corresponding to
     points evenly spaced within the tile
     """
-    movex = -gridstart[0]+transform[0,2]/gridstep[0]
-    movex += transform[0,1]*gridstart[1] + transform[0,0]*gridstart[0]
-    movey = -gridstart[1]+transform[1,2]/gridstep[1]
-    movey += transform[1,1]*gridstart[1] + transform[1,0]*gridstart[0]
-    T = np.array([[transform[1,1],transform[1,0],movey],
-                  [transform[0,1],transform[0,0],movex]])
+    T00, T01, T02, T10, T11, T12 = transform[:2,:3].flat
+    movex = ((T00-1)*gridstart[0] + T01*gridstart[1] + T02)/gridstep[0]
+    movey = ((T11-1)*gridstart[1] + T10*gridstart[0] + T12)/gridstep[1]
+    T = np.array([[T11,T10,movey],[T01,T00,movex]])
     return warpAffine(priorgrid, T, (gridlen[1],gridlen[0]),
                       flags=INTER_LINEAR,#+WARP_INVERSE_MAP,
                       borderMode=BORDER_CONSTANT, borderValue=initial_val)
@@ -102,14 +86,14 @@ def eigTwoxTwo(varx, vary, covxy):
 """
 def mapNormal2Grid(meanx, meany, varx, vary, covxy,
                     gridstart, gridstep, gridlen):
-    xposs = np.arange(gridstart[0], gridstart[0]+gridlen[0]+1) * gridstep[0]
+    xposs = np.arange(gridlen[0]+1)*gridstep[0] + gridstart[0]
     cdf = approxNormalCdf((xposs-meanx) / varx**.5)
     totalprobinside = cdf[-1] - cdf[0]
     if totalprobinside < 1e-10:
         # very low likelihood of appearance, just set to uniform
         return np.zeros(gridlen) + 1./gridlen[0]/gridlen[1]
     llx = np.diff(cdf) / totalprobinside
-    yposs = np.arange(gridstart[1], gridstart[1]+gridlen[1]+1) * gridstep[1]
+    yposs = np.arange(gridlen[1]+1)*gridstep[1] + gridstart[1]
     cdf = approxNormalCdf((yposs-meany) / vary**.5)
     totalprobinside = cdf[-1] - cdf[0]
     if totalprobinside < 1e-10:
@@ -125,7 +109,7 @@ note: cv2 transformation matrices have y-axis first
 def mapNormal2GridRot(meanx, meany, varx, vary, covxy,
                     gridstart, gridstep, gridlen):
     rectvx, rectvy, rectc, rects = eigTwoxTwo(varx, vary, covxy)
-    gridcenter = (gridstart + gridlen*.5)*gridstep
+    gridcenter = gridstart + gridlen*.5*gridstep
     rotmeanx = rectc*(meanx-gridcenter[0]) + rects*(meany-gridcenter[1]) + gridcenter[0]
     rotmeany = rectc*(meany-gridcenter[1]) - rects*(meanx-gridcenter[0]) + gridcenter[1]
     ingrid = mapNormal2Grid(rotmeanx, rotmeany, rectvx, rectvy,
@@ -172,7 +156,7 @@ if __name__ == '__main__':
     import matplotlib.pyplot as plt
     plt.ioff()
     
-    gridstart = np.array((-4,-2))
+    gridstart = np.array((-12.,-6.))
     gridlen = np.array((8,8))
     gridstep = np.array((3.,3.))
     
@@ -210,15 +194,12 @@ if __name__ == '__main__':
     plt.show()
     
 #    ## re-orient distribution
-    #transform = np.array(((1.,0,-4),(0,1,0),(0,0,1)))
-    transform = np.array(((.9798, -.2, -2.), (.2, .9798, 0), (0,0,1)))
+    transform = np.array(((1.,0,-4),(0,1,0),(0,0,1)))
+    #transform = np.array(((.9798, -.2, -2.), (.2, .9798, 0), (0,0,1)))
     initial_val = .1
-#    reoriented1 = reOrientGridOld(outgrid, transform, initial_val,
-#                               gridstep, gridstart, gridlen)
-    reoriented2 = reOrientGrid(outgrid, transform, initial_val,
+    reoriented = reOrientGrid(outgrid, transform, initial_val,
                                 gridstep, gridstart, gridlen)
     plt.figure(figsize=(10.,8.))
     plt.subplot(221).imshow(outgrid.T[::-1])
-#    plt.subplot(223).imshow(reoriented1.T[::-1])
-    plt.subplot(224).imshow(reoriented2.T[::-1])
+    plt.subplot(224).imshow(reoriented.T[::-1])
     plt.show()

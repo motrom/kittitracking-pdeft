@@ -13,9 +13,9 @@ currently not a modular function, a.k.a. based on the specific object parameteri
 from singleIntegrator.py
 """
 import numpy as np
-from config import grnd2checkgrid, grndstart, grndstep, grndlen
+from grid import grnd2checkgrid, gridstart, gridstep, gridlen
 from singleIntegrator import soPositionDistribution, ft_pexist
-from occupancygrid import mapNormal2Subgrid
+from gridtools import mapNormal2Subgrid
 
 
 """ determines whether tile with tracked object will be checked
@@ -42,7 +42,7 @@ def subselectDetector(objects, objecthypweights, occupancy, visibility, empty, r
         objuncertainty = objectEntropy(obj, objectexistprob)
         positiondist = soPositionDistribution(obj)
         subgridloc, occupysubgrid = mapNormal2Subgrid(positiondist,
-                                        grndstart, grndstep, grndlen, subsize=2)
+                                        gridstart, gridstep, gridlen, subsize=2)
         subgridend = subgridloc + occupysubgrid.shape
         tilescores[subgridloc[0]:subgridend[0],
                    subgridloc[1]:subgridend[1]] += occupysubgrid * objuncertainty
@@ -55,6 +55,6 @@ def subselectDetector(objects, objecthypweights, occupancy, visibility, empty, r
     tiles2detect = grnd2checkgrid[tiles2detect[-min(ntiles, ntilespossible):]]
     tiles2detect = np.append(tiles2detect, emptytiles, axis=0)
     # scatter detected tiles to binary grid
-    tiles2detectgrid = np.zeros(grndlen, dtype=bool)
+    tiles2detectgrid = np.zeros(gridlen, dtype=bool)
     tiles2detectgrid[tiles2detect[:,0], tiles2detect[:,1]] = 1
     return tiles2detectgrid

@@ -1,7 +1,5 @@
 # -*- coding: utf-8 -*-
 """
-last mod 7/2/19
-
 makes image-like map of point cloud, and uses this to approximate visibility of 
 objects
 
@@ -11,7 +9,7 @@ arbitrary lidar point clouds will require different code
 import numpy as np
 import numba as nb
 
-from config import grnd2checkgrid, grndstart, grndstep, grndlen
+from grid import grnd2checkgrid, gridstart, gridstep
 
 anglestart = -1.
 anglestop = 1.
@@ -32,7 +30,6 @@ laser_angles += -.02 # correction for observed angles
 laser_intercepts = np.zeros(64)
 laser_intercepts[:32] = .209 - .00036*np.arange(32,dtype=float)
 laser_intercepts[32:] = .126 - .00032*np.arange(32,dtype=float)
-laser_intercepts += 1.65
 # laser angle space * current laser gap * some multiplier for missing lasers
 height_angle_slack = .01*4*2
 lasers = list(range(55))
@@ -82,16 +79,16 @@ def pointCloud2OcclusionImg(pts, occlusionimg=None):
 def occlusionImg2Grid(occlusionimg, grid, grnd):
     laserheights = np.zeros(len(lasers))
     for tilex, tiley in grnd2checkgrid:
-        tilenearx = (grndstart[0]+tilex)*grndstep[0]
-        tilelefty = (grndstart[1]+tiley)*grndstep[1]
-        if tiley+grndstart[1] < 0:
-            tileneary = tilelefty + grndstep[1]
+        tilenearx = (gridstart[0]+tilex)*gridstep[0]
+        tilelefty = (gridstart[1]+tiley)*gridstep[1]
+        if tiley+gridstart[1] < 0:
+            tileneary = tilelefty + gridstep[1]
             startangle = np.arctan2(tilelefty, tilenearx)
-            endangle = np.arctan2(tilelefty+grndstep[1], tilenearx+grndstep[0])
+            endangle = np.arctan2(tilelefty+gridstep[1], tilenearx+gridstep[0])
         else:
             tileneary = tilelefty
-            startangle = np.arctan2(tilelefty, tilenearx+grndstep[1])
-            endangle = np.arctan2(tilelefty+grndstep[1], tilenearx+grndstep[0])
+            startangle = np.arctan2(tilelefty, tilenearx+gridstep[1])
+            endangle = np.arctan2(tilelefty+gridstep[1], tilenearx+gridstep[0])
         startapixel = int((startangle-anglestart)/angle_resolution)
         endapixel = int((endangle-anglestart)/angle_resolution)+1
         startapixel = max(min(startapixel, nangles-1), 0)
@@ -121,8 +118,8 @@ def boxTransparent(box, occlusionimg, grnd):
     y = box[1]
     l = .9
     w = .5
-    tilex = int(x/grndstep[0]-grndstart[0])
-    tiley = int(y/grndstep[1]-grndstart[1])
+    tilex = int(x/gridstep[0]-gridstart[0])
+    tiley = int(y/gridstep[1]-gridstart[1])
     grndhere = grnd[tilex, tiley]
     adjustedheight = grndhere[3]-grndhere[0]*x-grndhere[1]*y
     cos = np.cos(box[2])

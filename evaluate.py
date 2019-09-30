@@ -1,21 +1,87 @@
 #!/usr/bin/env python2
 # -*- coding: utf-8 -*-
 """
-last mod 6/4/19
+tools for evaluation
+__main__ code plots precision-recall and reports MOTA for selected results files
 """
 
 import numpy as np
 from scipy.optimize import linear_sum_assignment 
-from sklearn.metrics import average_precision_score
-import motmetrics
+import matplotlib.pyplot as plt
 
-overlapres = 50
+
+def soMetricIoU(boxa, boxb):
+    x = boxa[0]-boxb[0]
+    y = boxa[1]-boxb[1]
+    cb, sb = np.cos(boxb[2]), np.sin(boxb[2])
+    x,y = (x*cb+y*sb, -x*sb+y*cb)
+    c = np.cos(boxa[2]-boxb[2])
+    s = np.sin(boxa[2]-boxb[2])
+    la,wa = boxa[3:5]
+    lb,wb = boxb[3:5]
+    # gating
+    if np.hypot(x,y) > np.hypot(la,wa) + np.hypot(lb,wb):
+        return 0.
+    # simple cases where orientations are about the same
+    if abs(s) < 1e-3:
+        area = (min(lb, x+la)-max(-lb, x-la))*(min(wb, y+wa)-max(-wb, y-wa))
+        return area / (la*wa*4 + lb*wb*4 - area)
+    if abs(c) < 1e-3:
+        area = (min(lb, x+wa)-max(-lb, x-wa))*(min(wb, y+la)-max(-wb, y-la))
+        return area / (la*wa*4 + lb*wb*4 - area)
+    # calculate all corners and line intersections
+    pts = np.array(((-lb,-wb),(-lb,wb),(lb,wb),(lb,-wb), # corners of boxb
+                   ((c*(-y-wb) + wa)/s + x, -wb), # -w boxa, -w boxb
+                   ((c*(-y-wb) - wa)/s + x, -wb), # +w boxa, -w boxb
+                   ((s*(y+wb) + la)/c + x, -wb), # +l boxa, -w boxb
+                   ((s*(y+wb) - la)/c + x, -wb), # -l boxa, -w boxb
+                   ((c*(-y+wb) + wa)/s + x, wb), # -w boxa, +w boxb
+                   ((c*(-y+wb) - wa)/s + x, wb), # +w boxa, +w boxb
+                   ((s*(y-wb) + la)/c + x, wb), # +l boxa, +w boxb
+                   ((s*(y-wb) - la)/c + x, wb), # -l boxa, +w boxb
+                   (lb, (s*(lb-x) + wa)/c + y), # -w boxa, +l boxb
+                   (lb, (s*(lb-x) - wa)/c + y), # +w boxa, +l boxb
+                   (lb, (c*(x-lb) + la)/s + y), # +l boxa, +l boxb
+                   (lb, (c*(x-lb) - la)/s + y), # -l boxa, +l boxb
+                   (-lb, (-s*(lb+x) + wa)/c + y), # -w boxa, -l boxb
+                   (-lb, (-s*(lb+x) - wa)/c + y), # +w boxa, -l boxb
+                   (-lb, (c*(x+lb) + la)/s + y), # +l boxa, -l boxb
+                   (-lb, (c*(x+lb) - la)/s + y), # -l boxa, -l boxb
+                   (x-la*c+wa*s, y-la*s-wa*c), # -l,-w boxa
+                   (x-la*c-wa*s, y-la*s+wa*c),  # -l,w boxa
+                   (x+la*c-wa*s, y+la*s+wa*c), # l,w boxa
+                   (x+la*c+wa*s, y+la*s-wa*c), # l,-w boxa
+                  ))
+    # determine which corners/intersections are within both boxes
+    ptsin = abs(pts[:,0]) < lb+1e-6
+    ptsin &= abs(pts[:,1]) < wb+1e-6
+    ptsin &= abs(c*(pts[:,0]-x)+s*(pts[:,1]-y)) < la+1e-6
+    ptsin &= abs(-s*(pts[:,0]-x)+c*(pts[:,1]-y)) < wa+1e-6
+    if not np.any(ptsin): return 0.
+    assert np.sum(ptsin) > 2
+    # sort points, calculate area of convex polygon
+    pts = pts[ptsin]
+    centerpt = np.mean(pts, axis=0)
+    ptsangle = np.arctan2(pts[:,1]-centerpt[1],pts[:,0]-centerpt[0])
+    pts = pts[np.argsort(ptsangle)]
+    """ Ref: http://stackoverflow.com/questions/24467972/
+        calculate-area-of-polygon-given-x-y-coordinates """
+    area = 0.5*np.abs(np.dot(pts[:,0],np.roll(pts[:,1],1)) -
+                      np.dot(pts[:,1],np.roll(pts[:,0],1)))
+    return area / (la*wa*4 + lb*wb*4 - area)
+
+
+overlapres = 20
 overlapbox = np.mgrid[:float(overlapres), :float(overlapres)]
 overlapbox += .5
 overlapbox *= 2./overlapres
 overlapbox -= 1
 overlapbox = overlapbox.transpose((1,2,0))
-def soMetricIoU(boxa, boxb, cutoff = .7):
+def soMetricIoUApprox(boxa, boxb):
+    """
+    much simpler point-based approximation of 2D rectangle overlap
+    also fast @ low resolution
+    """
     relx = boxa[0]-boxb[0]
     rely = boxa[1]-boxb[1]
     ca, sa = np.cos(boxa[2]), np.sin(boxa[2])
@@ -28,283 +94,261 @@ def soMetricIoU(boxa, boxb, cutoff = .7):
     grid = np.einsum(R, [0,1], overlapbox, [2,3,1], [2,3,0]) + t
     intersection = np.sum(np.all(abs(grid) < 1, axis=2))
     ioa = float(intersection) / overlapres**2
-    iou = ioa / (1 - ioa + lb*wb/la/wa)
-    return cutoff - iou
-    
+    return ioa / (1 - ioa + lb*wb/la/wa)
 
-def soMetricEuc(boxa, boxb):
-    closeness = np.hypot(*(boxa[:2]-boxb[:2])) * .4
-    closeness += ((boxa[2]-boxb[2]+np.pi)%(2*np.pi)-np.pi) * 1.
-    closeness += np.hypot(*(boxa[3:]-boxb[3:5])) * .3
-    return closeness - 1
-
-class MetricAvgPrec():
+class MetricMine():
     """
-    builds histogram of scores for true and false samples
-    calculates average precision based on histogram (slight approximation)
+    for each timestep, match annotations & estimates and store scores of tps/fps
+    returns precision/recall curves + ID switches, as calculated by CLEAR
     """
-    def __init__(self, resolution=391, soMetric=soMetricIoU):
-        #self.cutoffs = np.append(np.linspace(-29, 10, resolution-1), [1000.])
-        self.cutoffs = np.append(np.linspace(-4, 9, resolution-1), [1000.])
-        self.counts = np.zeros((resolution, 5), dtype=int)
-        self.nmissed = np.zeros(4, dtype=int)
-        self.soMetric = soMetric
-        
-        self.faketru = np.zeros(resolution*2 + 1, dtype=bool)
-        self.faketru[:resolution] = True
-        self.faketru[-1] = True
-        self.fakeest = np.concatenate((np.arange(resolution),
-                                       np.arange(resolution), [-1.]))
-    
-    def add(self, gt, gtscored, gtdifficulty, ests, scores):
+    def __init__(self):
+        self.dets = []
+        self.nmissed = 0
+        self.previousids = {}
+        self.newscene = True
+    def newScene(self):
+        self.newscene = True
+    def okMetric(self, boxa, boxb):
+        return soMetricIoU(boxa, boxb) > .3
+    def goodMetric(self, boxa, boxb):
+        return soMetricIoU(boxa, boxb) > .7
+    def add(self, gt, gtscored, gtdifficulty, gtids, ests, scores, estids):
         ngt = gt.shape[0]
         assert gtscored.shape[0] == ngt
         assert gtdifficulty.shape[0] == ngt
         nests = ests.shape[0]
         assert scores.shape[0] == nests
-        matches = np.zeros((ngt, nests))
+        gtscored = gtscored & (gtdifficulty < 3)
+        matches = np.zeros((ngt, nests), dtype=bool)
         for gtidx, estidx in np.ndindex(ngt, nests):
-            score = self.soMetric(gt[gtidx], ests[estidx])
-            matches[gtidx, estidx] = min(score, 0)
-        matchesnonmiss = matches < 0
-        matches[:] = 0
-        matches[matchesnonmiss] = -1
-        matches *= scores
-        rowpairs, colpairs = linear_sum_assignment(matches)
+            matches[gtidx, estidx] = self.okMetric(gt[gtidx], ests[estidx])
+        matchscores = np.zeros((ngt, nests))
+        matchscores[matches] = -1
+        matchscores *= scores
+        matchscores[gtscored, :] *= 2 # want scored boxes to match more
+        rowpairs, colpairs = linear_sum_assignment(matchscores)
         gtmisses = np.ones(ngt, dtype=bool)
         estmisses = np.ones(nests, dtype=bool)
+        currentids = {}
         for gtidx, estidx in zip(rowpairs, colpairs):
-            if matchesnonmiss[gtidx, estidx]:
+            if matches[gtidx, estidx]:
                 gtmisses[gtidx] = False
                 estmisses[estidx] = False
-                gtdiffidx = gtdifficulty[gtidx] if gtscored[gtidx] else 3
-                scoreidx = np.searchsorted(self.cutoffs, scores[estidx])
-                self.counts[scoreidx, gtdiffidx:4] += 1
+                if gtscored[gtidx]:
+                    goodmatch = self.goodMetric(gt[gtidx], ests[estidx])
+                    switch = (not self.newscene and 
+                              gtids[gtidx] in self.previousids and
+                              self.previousids[gtids[gtidx]] != estids[estidx])
+                    self.dets.append((scores[estidx], True, goodmatch, switch))
+                    currentids[gtids[gtidx]] = estids[estidx]
         for gtidx in range(ngt):
-            if gtmisses[gtidx]:
-                gtdiffidx = gtdifficulty[gtidx] if gtscored[gtidx] else 3
-                self.nmissed[gtdiffidx:] += 1
+            if gtmisses[gtidx] and gtscored[gtidx]:
+                self.nmissed += 1
         for estidx in range(nests):
             if estmisses[estidx]:
-                scoreidx = np.searchsorted(self.cutoffs, scores[estidx])
-                self.counts[scoreidx, 4] += 1
-        
+                self.dets.append((scores[estidx], False, False, False))
+        self.previousids = currentids
+        self.newscene = False
     def calc(self):
-        avgprec = np.zeros(4)
-        for difficulty in range(4):
-            fakeweights = np.concatenate((self.counts[:,difficulty],
-                                          self.counts[:,4],
-                                          [self.nmissed[difficulty]]))
-            fakeweights = np.maximum(fakeweights, 1e-8)
-            avgprec[difficulty] = average_precision_score(self.faketru,
-                                   self.fakeest, sample_weight = fakeweights)
-        return avgprec
+        dets = np.array(sorted(self.dets)[::-1])
+        ndets = len(dets)
+        nt = sum(dets[:,1]) + self.nmissed
+        tps = np.cumsum(dets[:,1])
+        checkpts = np.append(np.where(np.diff(dets[:,0]))[0], ndets-1)
+        rec = tps[checkpts] / nt
+        prec = tps[checkpts] / (checkpts+1)
+        goodtpr = (np.cumsum(dets[:,2]))[checkpts] / nt
+        switches = np.cumsum(dets[:,3])[checkpts]
+        rec = np.concatenate(([0.], rec, [rec[-1]]))
+        prec = np.concatenate(([1.], prec, [0.]))
+        goodtpr = np.concatenate(([0.], goodtpr, [goodtpr[-1]]))
+        switches = np.concatenate(([switches[0]], switches, [switches[-1]]))
+        return np.array((rec, prec, goodtpr, switches)).T
+    def calcMOTA(self):
+        dets = np.array(sorted(self.dets)[::-1])
+        ndets = len(dets)
+        nt = sum(dets[:,1]) + self.nmissed
+        tps = np.cumsum(dets[:,1])
+        checkpts = np.append(np.where(np.diff(dets[:,0]))[0], ndets-1)
+        switches = np.cumsum(dets[:,3])[checkpts]
+        mota = (2*tps[checkpts] - checkpts-1 - switches) / float(nt)
+        return max(mota)
     
-    def calcKitti(self):
-        nthings = 11
-        avgprecs = np.zeros(4)
-        for difficulty in range(4):
-            totalhitcount = np.sum(self.counts[:,difficulty])
-            RR = np.cumsum(self.counts[:,difficulty])
-            RR = totalhitcount - RR + self.counts[:,difficulty]
-            totalcount = totalhitcount + self.nmissed[difficulty]
-            recallsteps = np.linspace(0, totalcount, nthings, endpoint=False)
-            recallsteps = recallsteps[recallsteps < totalhitcount]
-            steps = np.searchsorted(RR[::-1], recallsteps[::-1])[::-1]
-            area = 0.
-            for step in steps:
-                tp = float(RR[step])
-                area += tp / (tp + np.sum(self.counts[step:,4]) + 1e-8)
-            avgprecs[difficulty] = area / nthings
-                
     
-
-class MetricPrecRec():
-    def __init__(self, cutoff = .5, soMetric = soMetricEuc):
-        self.cutoff = cutoff
-        self.tp = np.zeros(4, dtype=int)
-        self.t = np.zeros(4, dtype=int)
-        self.p = 0
-        self.soMetric = soMetric
-        
-    def add(self, gt, gtscored, gtdifficulty, ests, scores):
-        for gtidx in range(gt.shape[0]):
-            gtbox = gt[gtidx]
-            difficultyidx = gtdifficulty[gtidx] if gtscored[gtidx] else 3
-            self.t[difficultyidx:] += 1
-            matches = False
-            for estidx, est in enumerate(ests):
-                if scores[estidx] > self.cutoff and self.soMetric(gtbox, est)<0:
-                    assert not matches, "object had 2 estimates that match"
-                    self.tp[difficultyidx:] += 1
-                    matches = True
-        self.p += np.sum(scores > self.cutoff)
-        
-    def calc(self):
-        tp = self.tp.astype(float)
-        return np.append(tp/self.t, tp[-1:]/self.p)
-
-
-class MetricMOT():
-    def __init__(self, cutoff = .45, soMetric = soMetricEuc):
-        self.accumulator = None#motmetrics.MOTAccumulator(auto_id=True)
-        self.cutoff = cutoff
-        self.soMetric = soMetric
-        self.sooptions = {}
-        self.accumulators = []
-        self.metricnames = ['mota','motp','num_switches','mostly_tracked',
-                            'mostly_lost','num_unique_objects']
+class MetricMineApprox():
+    """
+    like metricMine but uses greedy assignment instead of optimal assignment
+    basically the same result, nearly twice as fast
+    """
+    def __init__(self):
+        self.dets = []
+        self.switchscores = []
+        self.nmissed = 0
+        self.previousids = {}
+        self.previousscores = {}
+        self.newscene = True
     def newScene(self):
-        if not self.accumulator is None:
-            self.accumulators.append(self.accumulator)
-        self.accumulator = motmetrics.MOTAccumulator(auto_id=True)
+        self.previousids = {}
+        self.previousscores = {}
+    def okMetric(self, boxa, boxb):
+        return soMetricIoU(boxa, boxb) > .3
+    def goodMetric(self, boxa, boxb):
+        return soMetricIoU(boxa, boxb) > .7
     def add(self, gt, gtscored, gtdifficulty, gtids, ests, scores, estids):
-        ests = ests[scores > self.cutoff]
-        estids = estids[scores > self.cutoff]
-        gt = gt[gtscored & (gtdifficulty < 3)]
-        gtids = gtids[gtscored & (gtdifficulty < 3)]
         ngt = gt.shape[0]
+        assert gtscored.shape[0] == ngt
+        assert gtdifficulty.shape[0] == ngt
         nests = ests.shape[0]
-        matches = np.zeros((ngt, nests))
-        for gtidx, estidx in np.ndindex(ngt, nests):
-            score = self.soMetric(gt[gtidx], ests[estidx], **self.sooptions)
-            matches[gtidx, estidx] = min(score, 0)
-        matches[matches > 0] = np.nan
-        matches += 1.
-        self.accumulator.update(gtids, estids, matches)
+        assert scores.shape[0] == nests
+        gtscored = gtscored & (gtdifficulty < 3)
+        estorder = np.argsort(scores)[::-1]
+        gtopen = np.ones(ngt, dtype=bool)
+        currentids = {}
+        currentscores = {}
+        for estidx in estorder:
+            bestgtGood = False
+            bestgtScored = False
+            bestgtidx = None
+            for gtidx in range(ngt):
+                if gtopen[gtidx] and self.okMetric(gt[gtidx], ests[estidx]):
+                    keep = False
+                    swap = bestgtidx is None
+                    goodfit = self.goodMetric(gt[gtidx], ests[estidx])
+                    isscored = gtscored[gtidx]
+                    if not swap:
+                        keep = bestgtGood and not goodfit
+                        swap = bestgtGood and goodfit
+                    if not keep and not swap:
+                        swap = not bestgtScored and isscored
+                    if swap:
+                        bestgtidx = gtidx
+                        bestgtGood = goodfit
+                        bestgtScored = isscored
+            if bestgtidx is None:
+                self.dets.append((scores[estidx], False, False))
+            else:
+                gtopen[bestgtidx] = False
+            if bestgtScored:
+                self.dets.append((scores[estidx], True, bestgtGood))
+                # search for id swap
+                gtid = gtids[bestgtidx]
+                switch = (gtid in self.previousids and
+                          self.previousids[gtid] != estids[estidx])
+                if switch:
+                    switchscore = min(self.previousscores[gtid], scores[estidx])
+                    self.switchscores.append(switchscore)
+                currentids[gtid] = estids[estidx]
+                currentscores[gtid] = scores[estidx]
+        self.nmissed += sum(gtopen & gtscored)
+        self.previousids = currentids
+        self.previousscores = currentscores
     def calc(self):
-        allaccs = self.accumulators + [self.accumulator]
-        mh = motmetrics.metrics.create()
-        summary = mh.compute_many(allaccs,metrics=self.metricnames,
-                                  generate_overall=True)
-        #summary = mh.compute(self.accumulator, metrics=
-        #            ['mota','motp','num_switches','mostly_tracked','mostly_lost'],
-        #            name = 'acc')
-        return summary.loc['OVERALL']
-    
-    
-#img = imread(img_files.format(file_idx))[:,:,::-1]
-#
-#gtboxes = []
-#with open(gt_files.format(file_idx), 'r') as fd: gtstr = fd.read()
-#gtstr = gtstr.split('\n')
-#if gtstr[-1] == '': gtstr = gtstr[:-1]
-#for gtrow in gtstr:
-#    gtrow = gtrow.split(' ')
-#    if gtrow[0] == 'DontCare' or gtrow[0]=='Misc': continue
-#    gtboxes.append((float(gtrow[13]), -float(gtrow[11]),
-#        1.5708-float(gtrow[14]), float(gtrow[10])/2, float(gtrow[9])/2))
-#        
-#estboxes = []
-#with open(output_files.format(file_idx), 'r') as fd: gtstr = fd.read()
-#gtstr = gtstr.split('\n')
-#if gtstr[-1] == '': gtstr = gtstr[:-1]
-#for gtrow in gtstr:
-#    gtrow = gtrow.split(' ')
-#    if gtrow[0] == 'DontCare' or gtrow[0]=='Misc': continue
-#    estboxes.append((float(gtrow[13]), -float(gtrow[11]),
-#        1.5708-float(gtrow[14]), float(gtrow[10])/2, float(gtrow[9])/2))
-#    
-#ngt = len(gtboxes)
-#nest = len(estboxes)
-#match_mtx = np.zeros((ngt, nest))
-#for gtidx, gtbox in enumerate(gtboxes):
-#    gtbox_uv = xy2uv(gtbox)
-#    area_gt = gtbox[3]*gtbox[4]*4
-#    for estidx, estbox in enumerate(estboxes):
-#        estbox_uv = xy2uv(estbox)
-#        area_est = estbox[3]*estbox[4]*4
-#        iou = overlap(gtbox_uv, estbox_uv)
-#        iou /= (area_gt + area_est - iou)
-#        match_mtx[gtidx, estidx] = 1.-iou
-#ff = assignment(match_mtx, .3)
+        dets = np.array(sorted(self.dets)[::-1])
+        switchscores = -np.array(sorted(self.switchscores)[::-1])
+        ndets = len(dets)
+        nt = sum(dets[:,1]) + self.nmissed
+        tps = np.cumsum(dets[:,1])
+        checkpts = np.append(np.where(np.diff(dets[:,0]))[0], ndets-1)
+        rec = tps[checkpts] / nt
+        prec = tps[checkpts] / (checkpts+1)
+        goodtpr = (np.cumsum(dets[:,2]))[checkpts] / nt
+        switches = np.searchsorted(switchscores, -dets[checkpts,0])
+        rec = np.concatenate(([0.], rec, [rec[-1]]))
+        prec = np.concatenate(([1.], prec, [0.]))
+        goodtpr = np.concatenate(([0.], goodtpr, [goodtpr[-1]]))
+        switches = np.concatenate(([switches[0]], switches, [switches[-1]]))
+        return np.array((rec, prec, goodtpr, switches)).T
+    def calcMOTA(self):
+        dets = np.array(sorted(self.dets)[::-1])
+        switchscores = -np.array(sorted(self.switchscores)[::-1])
+        ndets = len(dets)
+        nt = sum(dets[:,1]) + self.nmissed
+        tps = np.cumsum(dets[:,1])
+        checkpts = np.append(np.where(np.diff(dets[:,0]))[0], ndets-1)
+        switches = np.searchsorted(switchscores, -dets[checkpts,0])
+        mota = (2*tps[checkpts] - checkpts-1 - switches) / float(nt)
+        return max(mota)
 
 
 
-
-def MAPfromfile(filename):
-    with open(filename, 'r') as fd:
-        all_results = fd.read()
-    results = [[float(score) for score in result.split(' ') if score != '']
-                    for result in all_results.split('\n')]
-    print([sum(result[::4])/11. for result in results])
-#MAPfromfile('../object/estimates/b/stats_car_detection_ground.txt')
-    
-    
-    
 if __name__ == '__main__':
     """
-        runs a single accuracy metric across multiple scenes
+        evaluate multiple estimates, plot together
         formatForKittiScore gets rid of things kitti didn't annotate
     """
-    from calibs import calib_extrinsics, calib_projections, view_by_day
-    from config import sceneranges
-    from config import calib_map_training as calib_map
-    from analyzeGT import readGroundTruthFileTracking, formatForKittiScoreTracking
-    from imageio import imread
+    from calibs import calib_extrinsics, calib_projections, view_by_day, imgshapes
+    from runconfig.example import scenes, gt_files, ground_plane_files
+    from kittiGT import readGroundTruthFileTracking, formatForKittiScoreTracking
     
-    scenes = [0,1,2,3,4,5,6,7,8,9]#[0,4,5]#
-    gt_files = 'Data/tracking_gt/{:04d}.txt'
-    estfiles = 'Data/estimates/trackingresults0/{:02d}f{:04d}.npy'
-    img_files = 'Data/tracking_image/training/{:04d}/000000.png'
-    ground_plane_files = 'Data/tracking_ground/training/{:02d}f{:06d}.npy'
     
-    metric = MetricAvgPrec()
-    metric2 = MetricMOT(soMetric = soMetricIoU)#
-    #metric2.sooptions['cutoff'] = .5
+    nframesahead = 0
+    estfiles = '/home/m2/Data/kitti/{:s}/{:02d}f{:04d}.npy'
+    tests = [('results/example', 'pdeft w/ PRCNN', 'b')]
     
-    for scene_idx in scenes:
-        # run some performance metrics on numpy-stored results
-        startfile, endfile = sceneranges[scene_idx]
-        calib_idx = calib_map[scene_idx]
-        calib_extrinsic = calib_extrinsics[calib_idx].copy()
-        calib_extrinsic[2,3] += 1.65
-        view_angle = view_by_day[calib_idx]
-        calib_projection = calib_projections[calib_idx]
-        calib_projection = calib_projection.dot(np.linalg.inv(calib_extrinsic))
-        imgshape = imread(img_files.format(scene_idx)).shape[:2]
-        with open(gt_files.format(scene_idx), 'r') as fd: gtfilestr = fd.read()
-        gt_all, gtdontcares = readGroundTruthFileTracking(gtfilestr, ('Car', 'Van'))
-        metric2.newScene()
+    results = []
+    motas = []
+    
+    for testfolder, testname, testcolor in tests:
+        metric = MetricMineApprox()
         
-        for fileidx in range(startfile, endfile):
-            ground = np.load(ground_plane_files.format(scene_idx, fileidx))
+        for scene_idx, startfile, endfile, calib_idx in scenes:
+            # run some performance metrics on numpy-stored results
+            startfile += nframesahead
+            calib_extrinsic = calib_extrinsics[calib_idx].copy()
+            view_angle = view_by_day[calib_idx]
+            calib_projection = calib_projections[calib_idx]
+            calib_projection = calib_projection.dot(np.linalg.inv(calib_extrinsic))
+            imgshape = imgshapes[calib_idx]
+            with open(gt_files.format(scene_idx), 'r') as fd: gtfilestr = fd.read()
+            gt_all, gtdontcares = readGroundTruthFileTracking(gtfilestr,('Car','Van'))
+            metric.newScene()
             
-            ests = np.load(estfiles.format(scene_idx, fileidx))
-            estids = ests[:,6].astype(int)
-            scores = ests[:,5]
-            ests = ests[:,:5]
-            rede = formatForKittiScoreTracking(ests, estids, scores, fileidx,
-                                ground, calib_projection, imgshape, gtdontcares)
-            ests = np.array([redd[0] for redd in rede])
-            scores = np.array([redd[2] for redd in rede])
-            estids = np.array([redd[1] for redd in rede])
-            
-            gthere = gt_all[fileidx]
-            gtboxes = np.array([gtobj['box'] for gtobj in gthere])
-            gtscores = np.array([gtobj['scored'] for gtobj in gthere],dtype=bool)
-            gtdifficulty = np.array([gtobj['difficulty'] for gtobj in gthere],dtype=int)
-            gtids = np.array([gtobj['id'] for gtobj in gthere],dtype=int)
-            gtdontcareshere = gtdontcares[fileidx]
-            
-            
-            metric2.add(gtboxes, gtscores, gtdifficulty, gtids, ests, scores, estids)
-            metric.add(gtboxes, gtscores, gtdifficulty, ests, scores)
-        
-    print(metric.calc())
-    print(metric2.calc())
-        
-if False:
-    from evaluate_tracking import trackingEvaluation, Mail
-    mail = Mail("")
-    e = trackingEvaluation(t_sha=
-                    "/home/m2/Data/kitti/estimates/trackingresults0/kitti/",
-                           mail=mail,cls="car")
-    assert e.loadTracker()
-    assert e.loadGroundtruth()
-    assert len(e.groundtruth) == len(e.tracker)
-    e.createEvalDir()
-    e.compute3rdPartyMetrics()
-    e.saveToStats()
-    mail.finalize(True,"tracking",
-                  "/home/m2/Data/kitti/estimates/trackingresults0/kitti/","")
+            for fileidx in range(startfile, endfile):
+                ground = np.load(ground_plane_files.format(scene_idx, fileidx))
+                
+                ests = np.load(estfiles.format(testfolder, scene_idx, fileidx))
+                estids = ests[:,6].astype(int)
+                scores = ests[:,5]
+                ests = ests[:,:5]
+                rede = formatForKittiScoreTracking(ests, estids, scores, fileidx,
+                                    ground, calib_projection, imgshape, gtdontcares)
+                ests = np.array([redd[0] for redd in rede])
+                scores = np.array([redd[2] for redd in rede])
+                estids = np.array([redd[1] for redd in rede])
+                
+                gthere = gt_all[fileidx]
+                gtboxes = np.array([gtobj['box'] for gtobj in gthere])
+                gtscores = np.array([gtobj['scored'] for gtobj in gthere],dtype=bool)
+                gtdifficulty = np.array([gtobj['difficulty'] for gtobj in gthere],
+                                        dtype=int)
+                gtids = np.array([gtobj['id'] for gtobj in gthere],dtype=int)
+                gtdontcareshere = gtdontcares[fileidx]
+                
+                metric.add(gtboxes, gtscores, gtdifficulty, gtids,
+                           ests, scores, estids)
+        restest = metric.calc()
+        results.append((testname, restest, testcolor))
+        motas.append(metric.calcMOTA())
+
+
+
+    fig, axeses = plt.subplots(1, 3, figsize=(12., 3.))
+    plt1, plt2, plt3 = axeses.flat
+    plt1.set_xlim((.5, 1.))
+    plt2.set_xlim((.5, 1.))
+    plt3.set_xlim((.5, 1.))
+    plt1.set_ylim((.5, 1.))
+    plt2.set_ylim((0., 1.))
+    plt1.set_title('Precision vs Recall')
+    plt2.set_title('Close fit recall vs Recall')
+    plt3.set_title('# identity swaps vs Recall')
+    maxswaps = int(max(np.max(result[1][:,3]) for result in results))+1
+    plt3.set_yticks(list(range(0, maxswaps, maxswaps//5+1)))
+    for testname, result, color in results:
+        plt1.plot(result[:,0], result[:,1], color, label=testname)
+        plt2.plot(result[:,0], result[:,2], color, label=testname)
+        plt3.plot(result[:,0], result[:,3], color, label=testname)
+    #plt3.legend(loc='center right')
+    plt3.legend(bbox_to_anchor = (1.04, 1), loc="upper left")
+    #plt1.legend(bbox_to_anchor = (0., -0.05), loc="upper left", ncol=4)
+    plt.show()

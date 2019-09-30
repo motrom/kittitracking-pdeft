@@ -6,7 +6,7 @@ also defines which tiles are relevant for tracking (for this dataset and benchma
 import numpy as np
 
 predictionview = np.array(((3., 50.), (-42., 42.)))
-grndstep = np.array((3., 3.))
+gridstep = np.array((3., 3.))
 nlocaltiles = 2
 
 def floor(arr):
@@ -14,20 +14,18 @@ def floor(arr):
     return np.floor(arr).astype(int) if type(arr) == np.ndarray else int(arr//1)
 
 # determine range of ground tiles
-#grndstart = floor(predictionview[:,0]/grndstep) - nlocaltiles
-#grndlen = floor(predictionview[:,1]/grndstep) + nlocaltiles+1 - grndstart
-grndstart = predictionview[:,0] - nlocaltiles*grndstep
-grndlen = np.ceil((predictionview[:,1]-predictionview[:,0])/grndstep).astype(int) + 2*nlocaltiles
-if grndlen[0]%2 == 1: grndlen[0] += 1
-if grndlen[1]%2 == 1: grndlen[1] += 1
+gridstart = predictionview[:,0] - nlocaltiles*gridstep
+gridlen = np.ceil((predictionview[:,1]-predictionview[:,0])/gridstep).astype(int) + 2*nlocaltiles
+if gridlen[0]%2 == 1: gridlen[0] += 1
+if gridlen[1]%2 == 1: gridlen[1] += 1
 
 # grid of cells that will be checked for objects
 # go ahead and remove cells that are outside of kitti annotated range
-grnd2checkgrid = np.mgrid[nlocaltiles:grndlen[0]-nlocaltiles,
-                          nlocaltiles:grndlen[1]-nlocaltiles].reshape((2,-1)).T.copy()
-checkgrid = grnd2checkgrid * grndstep
-_checkclosery = np.maximum(checkgrid[:,1]+grndstart[1]+grndstep[1],
-                                -checkgrid[:,1]-grndstart[1])
-_checkgridinclude = (checkgrid[:,0]+grndstart[0]+grndstep[0] > _checkclosery)
-_checkgridinclude &= checkgrid[:,0]+grndstart[0]+grndstep[0] > 3
+grnd2checkgrid = np.mgrid[nlocaltiles:gridlen[0]-nlocaltiles,
+                          nlocaltiles:gridlen[1]-nlocaltiles].reshape((2,-1)).T.copy()
+checkgrid = grnd2checkgrid * gridstep
+_checkclosery = np.maximum(checkgrid[:,1]+gridstart[1]+gridstep[1],
+                                -checkgrid[:,1]-gridstart[1])
+_checkgridinclude = (checkgrid[:,0]+gridstart[0]+gridstep[0] > _checkclosery)
+_checkgridinclude &= checkgrid[:,0]+gridstart[0]+gridstep[0] > 3
 grnd2checkgrid = grnd2checkgrid[_checkgridinclude]

@@ -1,23 +1,20 @@
 # -*- coding: utf-8 -*-
-"""
-last mod 2/4/19
-"""
-
 import numpy as np
+from grid import gridstart, gridstep, gridlen
 
-lidar_files = '../object/training/velodyne/{:06d}.bin'
-img_files = '../object/training/image_2/{:06d}.png'
-gt_files = '../object/training_labels_orig/{:06d}.txt'
-files_to_use = range(1000)
-
+# kitti scoring rules
 truncated_cutoffs = np.array((.15, .3, .5))
 occluded_cutoffs = np.array((0, 1, 2))
 height_cutoffs = np.array((40, 25, 25))
 scored_classes = ('Car', 'Pedestrian', 'Cyclist')
 
-nfiles_training = [154, 447, 233, 144, 314, 297, 270, 800, 390, 803, 294,
-                   373, 78, 340, 106, 376, 209, 145, 339, 1059, 837]
-        
+
+"""
+Converts kitti tracking ground truth files into useable format.
+Continues until the last annotation -- for a hypothetical scene with no annotations
+for a period at the end, it will mistaken return a shorter scene.
+But this doesn't happen in the existing kitti tracking training set.
+"""
 def readGroundTruthFileTracking(gtstr, classes_include = ('Car',)):
     gtstr = gtstr.split('\n')
     if gtstr[-1] == '': gtstr.pop()
@@ -50,7 +47,7 @@ def readGroundTruthFileTracking(gtstr, classes_include = ('Car',)):
         row_output['imbb'] = (float(gtrow[5]),float(gtrow[7]),
                               float(gtrow[4]),float(gtrow[6]))
         # elevation as meters up from car bottom
-        row_output['elevation'] = 1.65-float(gtrow[12])
+        row_output['elevation'] = -float(gtrow[12])
         # copy kitti's scoring-or-ignoring strategy
         truncation = float(gtrow[1])
         occlusion = int(gtrow[2])
@@ -66,9 +63,19 @@ def readGroundTruthFileTracking(gtstr, classes_include = ('Car',)):
         outputs[file_idx].append(row_output)
     return outputs, dontcares
 
+
+"""
+converting tracking estimates to kitti estimate files
+removes out-of-frame estimates & too-small estimates, which are not scored
+(so including them can only decrease performance)
+it also removes vehicles in dont-care regions
+Kitti does this for the 2D detection and tracking benchmarks
+but not the 3D detection benchmark
+to not remove dontcares, simply pass a length-0 tuple for each fileidx
+"""
 def formatForKittiScoreTracking(ests, estids, scores, fileidx,
                                 groundtiles, calib_project, imgshape, dontcares,
-                                scorecutoff=.5, carheight=1.7):
+                                scorecutoff=0., carheight=1.7, kitti_format=True):
     output_text_format = '{:d} {:d} {:s} {:.2f} {:d}' + ' {:.2f}'*13
     outputstr = []
     nests = len(ests)
@@ -78,8 +85,8 @@ def formatForKittiScoreTracking(ests, estids, scores, fileidx,
             continue
         if scores[estidx] < scorecutoff:
             continue
-        tilex = min(19, max(0, int(msmt[0]/3+1)))
-        tiley = min(31, max(0, int(msmt[1]/3+16)))
+        tilex = min(gridlen[0]-1, max(0, int((msmt[0]-gridstart[0])/gridstep[0])))
+        tiley = min(gridlen[1]-1, max(0, int((msmt[1]-gridstart[1])/gridstep[1])))
         groundtile = groundtiles[tilex, tiley]
         elev = groundtile[3] - groundtile[0]*msmt[0] - groundtile[1]*msmt[1]
         cos,sin = np.cos(msmt[2]), np.sin(msmt[2])
@@ -113,15 +120,17 @@ def formatForKittiScoreTracking(ests, estids, scores, fileidx,
                 removed = True
         if removed:
             continue
-        observation_angle = np.pi/2. - np.arctan2(msmt[1], msmt[0])
-        rotation_angle = np.pi/2. - msmt[2]
         estid = int(estids[estidx])
         score = scores[estidx]
-        output = (fileidx,estid,'Car',0.,0,observation_angle,left,top,right,bottom,
-                  1.7,#msmt[6],#
-                  msmt[4]*2,msmt[3]*2,-msmt[1],-elev+1.65,msmt[0],
-                  rotation_angle, score)
-        #outputstr.append(output_text_format.format(*output))
-    #return '\n'.join(outputstr)
-        outputstr.append((msmt[:5].copy(), estid, score))
+        if kitti_format:
+            observation_angle = np.pi/2. - np.arctan2(msmt[1], msmt[0])
+            rotation_angle = np.pi/2. - msmt[2]
+            output = (fileidx,estid,'Car',0.,0,observation_angle,left,top,right,bottom,
+                      carheight,msmt[4]*2,msmt[3]*2,-msmt[1],-elev,msmt[0],
+                      rotation_angle, score)
+            outputstr.append(output_text_format.format(*output))
+        else:
+            outputstr.append((msmt[:5].copy(), estid, score))
+    if kitti_format:
+        return '\n'.join(outputstr)
     return outputstr

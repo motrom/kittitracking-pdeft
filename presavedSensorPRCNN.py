@@ -1,8 +1,5 @@
-#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-last mod 8/16/19
-
 takes detection files as output by the PointRCNN default code
 https://github.com/sshaoshuai/PointRCNN
 
@@ -14,7 +11,8 @@ well as possible to probability of genuity
 from os.path import isfile
 import numpy as np
 
-dataformat = '/home/m2/Data/kitti/estimates/detectionsPRCNNtext/{:02d}f{:04d}.txt'
+#dataformat = '/home/m2/Data/kitti/estimates/detectionsPRCNNtext/{:02d}f{:04d}.txt'
+dataformat = '/home/motrom/Downloads/kitti_devkit/detectionsPRCNN/{:02d}f{:04d}.txt'
 
 # better results on nofake setting if this is set a bit higher (.15)
 min_sensor_prob_to_report = .03
@@ -45,16 +43,15 @@ def getMsmts(sceneidx, fileidx):
     return data
 
 
+
 if __name__ == '__main__':
     # analyze score distribution for true and false detections
     from sklearn.neighbors import KernelDensity
-    from sklearn.linear_model import LinearRegression
     from scipy.optimize import linear_sum_assignment
     import matplotlib.pyplot as plt
     
-    from evaluate import MetricAvgPrec, soMetricIoU
-    from analyzeGT import readGroundTruthFileTracking
-    from trackinginfo import sceneranges
+    from evaluate import soMetricIoU
+    from kittiGT import readGroundTruthFileTracking
     
     gt_files = '/home/m2/Data/kitti/tracking_gt/{:04d}.txt'
     scene_idxs = list(range(10))
@@ -64,7 +61,6 @@ if __name__ == '__main__':
     scoresmiss = []
     nmissed = 0
     nmissedcrop = 0
-    metric = MetricAvgPrec()
     
     for scene_idx in scene_idxs:
         startfileidx, endfileidx = sceneranges[scene_idx]
@@ -108,8 +104,6 @@ if __name__ == '__main__':
                 if msmtsmissed[msmtidx]:
                     scoresmiss.append(msmts[msmtidx,5])
             
-            metric.add(gtboxes, gtscored, gtdiff, msmts[:,:5], msmts[:,5])
-            
     scoresmatch.sort()
     scorescrop.sort()
     scoresmiss.sort()
@@ -121,20 +115,10 @@ if __name__ == '__main__':
     maxscore = np.percentile(allscores, 99.5)
     scorearray = np.linspace(minscore, maxscore, 100)
     kd = KernelDensity(bandwidth = (maxscore-minscore)/50, kernel='gaussian')
-    scoreT = kd.fit(np.array(scoresmatch)[:,None]).score_samples(
-                        scorearray[:,None])
+    scoreT = kd.fit(np.array(scoresmatch)[:,None]).score_samples(scorearray[:,None])
     scoreT = np.exp(scoreT) * relmatches
     scoreF = kd.fit(np.array(scoresmiss)[:,None]).score_samples(
                         scorearray[:,None])
     scoreF = np.exp(scoreF) * (1-relmatches)
     ratio = scoreT / np.maximum(scoreT + scoreF, 1e-8)
-    # fit a quadratic model to the ratio of true to false
-    X = np.column_stack((scorearray, scorearray**2))
-    lm = LinearRegression(fit_intercept=True, normalize=True).fit(X, ratio)
-    coefs = (lm.intercept_, lm.coef_[0], lm.coef_[1])
-    print(coefs)
-    ests = coefs[0] + coefs[1]*scorearray + coefs[2]*scorearray**2
-    plt.plot(scorearray, ratio, 'b', scorearray, ests, 'g--')
-    
-    
-    avgprec = metric.calc()
+    plt.plot(scorearray, ratio, 'b')

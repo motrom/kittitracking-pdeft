@@ -11,18 +11,20 @@ to reach a small set of new tiles. Or you could make a map...
 """
 
 import numpy as np
-from grid import grndstep, grndstart, grndlen, floor
+from grid import gridstep, gridstart, gridlen, floor
 
 max_road_slope = .1 # tangent
 # slope ~= .15 , current highest kitti slope seems to be .998
 min_road_normal = 1./(max_road_slope**2 + 1)
 
+standard_height = 1.65 # rough height of kitti forward camera
+
+# ground calculation algorithm parameters
 min_npoints = 100
 min_ratio_below = .1
 init_quantile = .3
 sac_thresh = .15
 sac_niter = 8
-
 cutoff_divider_constant = np.sqrt(1 + .1**2 * 4)
 cutoff_height = .5
 
@@ -33,31 +35,30 @@ def tilePoints(pts, gridstart, gridstep, gridlen):
     allows for fast access of points within certain set of tiles
     returns: pts array reordered (copy), integer matrix of pts-indices for each tile
     """
-    pts_grnd = floor(pts[:,:2]/gridstep) - gridstart
+    pts_grnd = floor((pts[:,:2] - gridstart)/gridstep)
     include = np.all(pts_grnd >= 0, axis=1) & np.all(pts_grnd < gridlen, axis=1)
     grndidx = gridlen[1] * pts_grnd[include,0] + pts_grnd[include,1]
     grndorder = np.argsort(grndidx)
     tileidxs = np.searchsorted(grndidx[grndorder], range(gridlen[0]*gridlen[1]+1))
-    #tileidxs = tileidxs.reshape(grndlen)
+    #tileidxs = tileidxs.reshape(gridlen)
     return pts[include][grndorder], tileidxs
 
 
 def getGround(pts):
-    ntx, nty = grndlen
+    ntx, nty = gridlen
     # divide points by tiles
     ntiles = ntx * nty
     tile_range = range(ntiles)
     
     # select points within relevant region
-    include = pts[:,2] - (abs(pts[:,1]) + pts[:,0])*.1 < cutoff_height * cutoff_divider_constant
-    include &= pts[:,0] > grndstart[0]
-    include &= pts[:,1] > grndstart[1]
-    include &= pts[:,0] < (grndstart[0] + ntx)*grndstep[0]*2
-    include &= pts[:,1] < (grndstart[1] + nty)*grndstep[1]*2
-    # was subsampling by 2 before
+    cutoffheight = cutoff_height * cutoff_divider_constant - standard_height
+    include = pts[:,2] - (abs(pts[:,1]) + pts[:,0])*.1 < cutoffheight
+    include &= np.all(pts >= gridstart, axis=1)
+    include &= np.all(pts <= gridstart + gridlen*gridstep, axis=1)
+    # optionally subsample points
     pts = pts[include][::1]
     
-    quantized_xy = floor(pts[...,:2]/grndstep) - grndstart
+    quantized_xy = floor((pts[...,:2] - gridstart)/gridstep)
     # find supertile indices for first layer
     quantized_layer1 = quantized_xy // 2
     pt_tiles1 = quantized_layer1[:,0]*nty//2 + quantized_layer1[:,1]
@@ -111,7 +112,7 @@ def getGround(pts):
         plane = np.array((0,0,1.,init_height))
 
         best_npoints = 0
-        best_plane = np.array((0,0,1.,0))
+        best_plane = np.array((0,0,1.,standard_height))
         for attempt in range(sac_niter):
             errors = abs(plane[3] - pts_tile.dot(plane[:3]))
             assert not np.any(np.isnan(errors))
@@ -181,7 +182,6 @@ def getGround(pts):
                     scores[tilex, tiley] = 0
     
     # for yet-unfit tiles, determine which tiles to replace with
-#    n_support = np.zeros(ntx*nty, dtype=int)
     # forward-right pass
     for tile in tile_range:
         # get nearby tiles and scores
@@ -203,17 +203,6 @@ def getGround(pts):
             if score2 < score:
                 score = score2
                 planes[tilex, tiley] = planes[adjacent_tile]
-#                pts_tile = pts[pts_reorder[tile_idxs[tile]:tile_idxs[tile+1]]]
-#                errs = pts_tile.dot(planes[adjacent_tile,:3])-planes[adjacent_tile,3]
-#                support = sum(abs(errs) < sac_thresh)
-#                n_support[tile] = support
-#            elif score2 == score:
-#                pts_tile = pts[pts_reorder[tile_idxs[tile]:tile_idxs[tile+1]]]
-#                errs = pts_tile.dot(planes[adjacent_tile,:3])-planes[adjacent_tile,3]
-#                support = sum(abs(errs) < sac_thresh)
-#                if support > n_support[tile]:
-#                    n_support[tile] = support
-#                    planes[tile] = planes[adjacent_tile]
         scores[tilex, tiley] = score
     # backward-left pass    
     for tile in tile_range[::-1]:
@@ -242,10 +231,10 @@ def getGround(pts):
 
 
 def planes2Transforms(groundplanes):
-    transforms = np.zeros((grndlen[0],grndlen[1],4,4))
-    for tilex in range(grndlen[0]):
-        for tiley in range(grndlen[1]):
-            gridcenter = (grndstart + (tilex,tiley))*grndstep + grndstep*.5
+    transforms = np.zeros((gridlen[0],gridlen[1],4,4))
+    for tilex in range(gridlen[0]):
+        for tiley in range(gridlen[1]):
+            gridcenter = gridstart + gridstep*(tilex+.5,tiley+.5)
             plane = groundplanes[tilex, tiley]
             gridcenterz = plane[3] - plane[0]*gridcenter[0] - plane[1]*gridcenter[1]
             # find pose of tile, R.dot(pt in tile ref) + t = pt in global ref
@@ -275,7 +264,6 @@ if __name__ == '__main__':
     
     for scene_idx, startfileidx, endfileidx, calib_idx in scenes:
         calib_extrinsic = calib_extrinsics[calib_idx].copy()
-        calib_extrinsic[2,3] += 1.65 # rough camera height
         print("making ground for scene {:d}".format(scene_idx))
         for fileidx in range(startfileidx, endfileidx):
             # load relevant data
@@ -313,7 +301,6 @@ if False:
     def grayer(img): return ((img.astype(float)-128)*.95 + 128).astype(np.uint8)
     
     calib_extrinsic = calib_extrinsics[calib_idx].copy()
-    calib_extrinsic[2,3] += 1.65
     calib_projection = calib_projections[calib_idx]
     calib_intrinsic = calib_projection.dot(np.linalg.inv(calib_extrinsic))
     view_angle = view_by_day[calib_idx]
@@ -336,7 +323,7 @@ if False:
         pixel_to_ground[0] += 60.
         pixel_to_ground[1] += 30.
         pixel_to_ground = pixel_to_ground.transpose((1,2,0))
-        quantized = floor(pixel_to_ground[:,:,:2]/grndstep)-grndstart
+        quantized = floor((pixel_to_ground[:,:,:2]-gridstart)/gridstep)
         planes = ground[quantized[:,:,0], quantized[:,:,1]]
         heights = (planes[:,:,3] - planes[:,:,0]*pixel_to_ground[:,:,0] -
                    planes[:,:,1]*pixel_to_ground[:,:,1])
@@ -346,9 +333,9 @@ if False:
         plotimg = np.minimum((plotimg[:,:,:3]/plotimg[:,:,3:]),255.).astype(np.uint8)
         
         # add lidar points to image
-        tpts, tidxs = tilePoints(data, grndstart, grndstep, grndlen)
+        tpts, tidxs = tilePoints(data, gridstart, gridstep, gridlen)
         for tilex, tiley in grnd2checkgrid:
-            tileidx = tilex*grndlen[1] + tiley
+            tileidx = tilex*gridlen[1] + tiley
             pts = tpts[tidxs[tileidx]:tidxs[tileidx+1]]
             groundtile = ground[tilex, tiley]
             heights = pts.dot(groundtile[:3]) - groundtile[3]
