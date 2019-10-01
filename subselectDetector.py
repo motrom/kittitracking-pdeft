@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-last mod 7/17/19
-
 Determines the 3m x 3m tiles that are most important to apply object detection on.
 This can be used to speed up an object detector, at the cost of lowered accuracy
 because of missed detections (but that's the reason to carefully choose tiles to miss).
@@ -25,9 +23,15 @@ or tile adjacent to border
 _steadystatedistentropy = .9
 _maxdistentropy = 3.
 _existentropymultiplier = .1/.25 * _maxdistentropy/_steadystatedistentropy
-def objectEntropy(obj, existprob):
-    variances = obj[[6,13,20,27,34]]
-    distentropy = np.clip(np.sum(np.sqrt(variances)), 0, _maxdistentropy)
+#def objectEntropy(obj, existprob):
+#    variances = obj[[7,15,23,31,39]]
+#    distentropy = np.clip(np.sum(np.sqrt(variances)), 0, _maxdistentropy)
+#    distentropy *= .05 / _steadystatedistentropy
+#    return existprob*distentropy + (1 - existprob)*existprob*_existentropymultiplier
+def objectEntropy(posdist, existprob):
+    xvar,yvar,xycov = posdist[2:5]
+    # root sum square of deviation in major directions
+    distentropy = np.clip(np.sqrt(xvar+yvar), 0, _maxdistentropy)
     distentropy *= .05 / _steadystatedistentropy
     return existprob*distentropy + (1 - existprob)*existprob*_existentropymultiplier
 
@@ -39,8 +43,9 @@ def subselectDetector(objects, objecthypweights, occupancy, visibility, empty, r
         obj = objects[objidx]
         objectexistprob = obj[ft_pexist] * objecthypweights[objidx]
         if objectexistprob < 1e-3: continue
-        objuncertainty = objectEntropy(obj, objectexistprob)
+        #objuncertainty = objectEntropy(obj, objectexistprob)
         positiondist = soPositionDistribution(obj)
+        objuncertainty = objectEntropy(positiondist, objectexistprob)
         subgridloc, occupysubgrid = mapNormal2Subgrid(positiondist,
                                         gridstart, gridstep, gridlen, subsize=2)
         subgridend = subgridloc + occupysubgrid.shape

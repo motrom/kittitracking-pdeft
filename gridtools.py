@@ -133,8 +133,8 @@ if cell outside of grid, returns size-0 subgrid
 """
 def mapNormal2Subgrid(normalparams, gridstart, gridstep, gridlen, subsize = 0):
     meanx, meany, varx, vary, covxy = normalparams
-    tilex = int(np.floor(meanx/gridstep[0]))-gridstart[0]
-    tiley = int(np.floor(meany/gridstep[1]))-gridstart[1]
+    tilex = int((meanx-gridstart[0])/gridstep[0])
+    tiley = int((meany-gridstart[1])/gridstep[1])
     tilexmin = max(tilex-subsize, 0)
     tilexmax = min(tilex+subsize+1,gridlen[0])
     tileymin = max(tiley-subsize, 0)
@@ -144,7 +144,7 @@ def mapNormal2Subgrid(normalparams, gridstart, gridstep, gridlen, subsize = 0):
     if any(subgridlen <= 0): # size-0 subgrid
         return np.array((0,0)), np.zeros((0,0))
     subgrid = mapNormal2GridRot(meanx, meany, varx, vary, covxy,
-                                subgridstart + gridstart, gridstep, subgridlen)
+                        subgridstart*gridstep + gridstart, gridstep, subgridlen)
     return subgridstart, subgrid
     
     

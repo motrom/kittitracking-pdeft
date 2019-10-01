@@ -12,12 +12,13 @@ gt_files = '/home/motrom/Downloads/kitti_devkit/tracking/training/label_02/{:04d
 
 oxt_files = '/home/motrom/Downloads/kitti_devkit/tracking/training/oxts/{:04d}.txt'
 
-ground_files = '/home/motrom/Downloads/kitti_devkit/trackingground/training/{:02d}f{:06d}.npy'
+ground_files = ('/home/motrom/Downloads/kitti_devkit/tracking/trackingground/'+
+                'training/{:02d}f{:06d}.npy')
 
-save_estimates = False
-estimate_files = '/home/m2/Data/kitti/estimates/trackresultsPRC/{:02d}f{:04d}.npy'
+save_estimates = True
+estimate_files = '/home/motrom/Downloads/kitti_devkit/testestimates/{:02d}f{:04d}.npy'
 
-display_video = True
+display_video = False
 save_video = False
 video_file = 'results.mp4'
 img_files =  ('/home/motrom/Downloads/kitti_devkit/tracking/training/image_02'+
@@ -31,3 +32,4 @@ some other scenes are missing the last file, which also has incomplete lidar dat
 """
 scenes = [(0,0,153,0), (1,181,447,0), (2,0,233,0), (3,0,144,0), (4,0,314,0),
           (5,0,296,0), (6,0,270,0), (7,0,799,0), (8,0,390,0), (9,0,802,0)]
+#scenes = [(3,0,20,0)]

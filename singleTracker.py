@@ -13,11 +13,17 @@ from math import hypot, atan2
 stdpersecond = np.array((.4, .4, .1, .2, .15, 1.7, .3))
 dt = .1
 #stdmsmt = np.array((.6, .6, .3, .6, .3)) ### for voxeljones
-stdmsmt = np.array((.4, .4, .2, .4, .2)) ### for prcnn
+stdmsmt = np.array((.4, .4, .2, .5, .25)) ### for prcnn
 # P/(std^2 * dt) * (P - std^2*dt)
-angvelredirect = 6.69#9 * stdpersecond[6]**2
+angvelredirect = 6.69
 nft = 56
 piover2 = np.pi/2.
+
+# legacy
+#stdpersecond = np.array((.6, .6, .3, .2, .15, 1.6, .0001))
+#dt = .1
+#stdmsmt = np.array((.4, .4, .2, .6, .3)) ### for prcnn
+#angvelredirect = .01
 
 def uniformMeanAndVar(loval, hival):
     return (hival+loval)/2., (hival-loval)**2/12.
@@ -120,8 +126,14 @@ def update(sample, prepped_sample, msmt):
 varpertimestep = stdpersecond**2 * dt
 def predict(sample):
     """
-    covariances of the next step's position were calculated using moment approximations
-    of the angle, for example cos(theta+del) = cos(theta)*(1-del^2/2) - sin(theta)*del
+    x = x + v*cos(theta)*dt
+    y = y + v*sin(theta)*dt
+    theta = theta + angvel*dt
+    covariances of the next step's position were calculated using
+    2nd order polynomial approximations
+    for example
+    x = x + v*dt*(cos(meantheta)*cos(deltheta)-sin(meantheta)*sin(deltheta))
+    d^2x/d(theta)d(v) evaluated at meantheta,meanv = -dt*sin(meantheta)
     """
     cos = np.cos(sample[2])
     sin = np.sin(sample[2])
@@ -177,7 +189,7 @@ def likelihoodNewObject(msmt):
 
 
 initialspeedvariance = 5. ** 2
-initialangvelvariance = .5 ** 2
+initialangvelvariance = .5 ** 2 # legacy .000001
 def mlSample(msmt):
     """
     the hypothetical sample that maximizes the likelihood of this msmt
@@ -207,11 +219,11 @@ def validSample(sample):
     cov += cov.T # symmetrize
     valid &= np.all(cov[diagonal_idxs_sample] > 0)
     valid &= np.linalg.det(cov) > 0
-    valid &= cov[0,0] < 400#64
-    valid &= cov[1,1] < 400#64
-    valid &= cov[2,2] < 1.#.49
-    valid &= cov[3,3] < 36#16
-    valid &= cov[4,4] < 20#9
+    valid &= cov[0,0] < 400
+    valid &= cov[1,1] < 400
+    valid &= cov[2,2] < 2.5
+    valid &= cov[3,3] < 36
+    valid &= cov[4,4] < 20
     return valid
 
 

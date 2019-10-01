@@ -7,9 +7,9 @@ tracking details:
         reality determined in first step via score
 """
 
-from runconfigs.example import lidar_files, img_files, gt_files, oxt_files, ground_files,\
-                                save_estimates, estimate_files, display_video,\
-                                save_video, video_file, scenes
+from runconfigs.exampledesktop import lidar_files, img_files, gt_files, oxt_files,\
+                                      ground_files, save_estimates, estimate_files,\
+                                      display_video, save_video, video_file, scenes
 
 import numpy as np
 import numba as nb
@@ -31,7 +31,7 @@ from subselectDetector import subselectDetector
 from presavedSensorPRCNN import getMsmts as detect
 import singleIntegrator as singleIntegrator
 from occlusion import pointCloud2OcclusionImg, occlusionImg2Grid, boxTransparent
-from hyphoplabeler import HypHopLabeler as Labeler
+from labelers import SingleHypLabeler as Labeler
 
 soPrepObject = singleIntegrator.prepObject
 soLikelihood = singleIntegrator.likelihood
@@ -109,16 +109,22 @@ occupancy = np.zeros(gridlen) + occupancy_outer
 occupancy_transform = np.eye(3)
 visibility = occupancy.copy()
 occlusionimg = None
-labeler = Labeler(n_objects, 200, 10)
+labeler = Labeler(n_objects)
 
-if save_video: video = get_writer(video_file, mode='I', fps=4)
+if save_video:
+    video = get_writer(video_file, mode='I', fps=4)
+if display_video:
+    videostopped = False
 
 for scene_idx, startfileidx, endfileidx, calib_idx in scenes:
+    if display_video and videostopped: break
+    
     calib_extrinsic = calib_extrinsics[calib_idx]
-    view_angle = view_by_day[calib_idx]
-    with open(gt_files.format(scene_idx), 'r') as fd: gtfilestr = fd.read()
-    gt_all, gtdontcares = readGroundTruthFileTracking(gtfilestr, ('Car', 'Van'))
     selfpos_transforms = loadSelfTransformations(oxt_files.format(scene_idx))
+    if display_video or save_video:
+        with open(gt_files.format(scene_idx), 'r') as fd: gtfilestr = fd.read()
+        gt_all, gtdontcares = readGroundTruthFileTracking(gtfilestr, ('Car', 'Van'))
+        view_angle = view_by_day[calib_idx]
     
     objects[:] = 0.
     labeler.reset()
@@ -128,14 +134,13 @@ for scene_idx, startfileidx, endfileidx, calib_idx in scenes:
         data = np.fromfile(lidar_files.format(scene_idx, fileidx),
                            dtype=np.float32).reshape((-1,4))[:,:3]
         data = data.dot(calib_extrinsic[:3,:3].T) + calib_extrinsic[:3,3]
-        img = imread(img_files.format(scene_idx, fileidx))[:,:,::-1]
-        gt = gt_all[fileidx] # used for plotting only
         selfposT = selfpos_transforms[fileidx][[0,1,3],:][:,[0,1,3]]
         ground = np.load(ground_files.format(scene_idx, fileidx))
+        #ground[:,:,3] -= 1.65 ### TEMP !!!!
         
         # propagate objects
         for objidx in range(n_objects):
-            if objects[so_ft_pexist]==0: continue
+            if not objects[objidx,so_ft_pexist]: continue
             obj = objects[objidx]
             soReOrient(obj, selfposT)
             soPredict(obj)
@@ -203,7 +208,7 @@ for scene_idx, startfileidx, endfileidx, calib_idx in scenes:
             if boxTransparent(msmt, occlusionimg, ground):
                 tilex, tiley = floor((msmt[:2]-gridstart)/gridstep).astype(int)
                 if tiles2detectgrid[tilex,tiley]:
-                    msmtsnew.append((msmt, occupancy[tilex, tiley]))
+                    msmtsnew.append(np.append(msmt, occupancy[tilex, tiley]))
         msmts, msmtsold = msmtsnew, msmts
 
         # update occupancy grid, given detections
@@ -223,6 +228,9 @@ for scene_idx, startfileidx, endfileidx, calib_idx in scenes:
         # data association
         matches[:,:nmsmts] = np.minimum(matches[:,:nmsmts], 0.)
         objmatch, msmtmatch = linear_sum_assignment(matches[:,:nmsmts])
+        actualmatch = matches[objmatch, msmtmatch] < 0
+        objmatch = objmatch[actualmatch]
+        msmtmatch = msmtmatch[actualmatch]
         nmatches = len(objmatch)
         npairspreprune = n_objects + nmsmts - nmatches
         updatepairs[:n_objects,0] = np.arange(n_objects)
@@ -233,7 +241,6 @@ for scene_idx, startfileidx, endfileidx, calib_idx in scenes:
         msmtmisses[msmtmatch] = False
         updatepairs[n_objects:npairspreprune,1] = np.where(msmtmisses)[0]    
         # prune
-        nupdatepairs = min(n_objects, npairspreprune)
         for newobjidx in range(npairspreprune):
             objidx, msmtidx = updatepairs[newobjidx]
             if objidx == -1:
@@ -246,8 +253,8 @@ for scene_idx, startfileidx, endfileidx, calib_idx in scenes:
         prunedpairs = np.argpartition(prepruneweights[:npairspreprune],
                                      npairspreprune-n_objects)[npairspreprune-n_objects:]
         # tentative update
-        for newobjidx in prunedpairs:
-            objidx, msmtidx = updatepairs[newobjidx]
+        for newobjidx, oldobjidx in enumerate(prunedpairs):
+            objidx, msmtidx = updatepairs[oldobjidx]
             if objidx == -1:
                 # new object
                 newobjects[newobjidx] = soUpdateNew(msmts[msmtidx])
@@ -259,8 +266,7 @@ for scene_idx, startfileidx, endfileidx, calib_idx in scenes:
                 msmt = msmtsprepped[msmtidx]
                 newobjects[newobjidx] = soUpdateMatch(objects[objidx], msmts[msmtidx])
         # resolve update
-        assert all(validSample(newobjects[objidx]) for objidx in range(nupdatepairs)
-                   if newobjects[objidx, so_ft_pexist])
+        assert all(validSample(obj) for obj in newobjects if obj[so_ft_pexist])
         objects, newobjects = newobjects, objects
         
         # report
@@ -275,7 +281,8 @@ for scene_idx, startfileidx, endfileidx, calib_idx in scenes:
                 reportedscores.append(reportscore)
         reportedobjects = np.array(reportedobjects).reshape((-1,5))
         reportedscores = np.array(reportedscores)
-        reportedlabels = labeler.add(updatepairs, reportedidxs)
+        reportedidxs = np.array(reportedidxs, dtype=int)
+        reportedlabels = labeler.add(updatepairs[prunedpairs], reportedidxs)
         assert np.all(np.diff(np.sort(reportedlabels))) # all unique labels
         fullreports = np.column_stack((reportedobjects, reportedscores, reportedlabels))
 #        fullreports = np.concatenate((reportedobjects, reportedscores[:,None],
@@ -286,6 +293,9 @@ for scene_idx, startfileidx, endfileidx, calib_idx in scenes:
         
         # view
         if display_video or save_video:
+            gt = gt_all[fileidx]
+            img = imread(img_files.format(scene_idx, fileidx))[:,:,::-1]
+            
             plotimg1 = plotImgKitti(view_angle)
             plotimg2 = plotImgKitti(view_angle)
             # shade tiles chosen for detection
@@ -307,7 +317,7 @@ for scene_idx, startfileidx, endfileidx, calib_idx in scenes:
             # add measurements
             for msmt in msmts:
                 color = hsv2Rgba(.33, 1., .7, min(1., msmt[5]/.6))
-                plotRectangleEdges(plotimg1, msmt[0], (70,255.9*.5,70,.5))
+                plotRectangleEdges(plotimg1, msmt[:5], (70,255.9*.5,70,.5))
             # shade each tile by occupancy
             for tilex, tiley in np.ndindex(*gridlen):
                 tilecenterx = (tilex+.5)*gridstep[0] + gridstart[0]
@@ -319,9 +329,12 @@ for scene_idx, startfileidx, endfileidx, calib_idx in scenes:
                 addRect2KittiImg(plotimg2, (tilecenterx, tilecentery, 0., 1.5, 1.5),
                                  np.array((color*.2, color*.2, color*.2, .2)))
             for report in fullreports:
-                hue = report[6]%16/16.
+                hue = report[6]%12/12.
                 hue = (hue*5/6 + 9./12) % 1.
-                shade = min(1., report[5] / .6)
+                shade = (1. if report[5] > .7 else
+                         .45 if report[5] > .3 else
+                         .05 if report[5] > .1 else
+                         0.)
                 color = hsv2Rgba(hue, .9, 1., shade)
                 plotRectangleEdges(plotimg2, report[:5], color)
             # put the plot on top of the camera image to view, display
@@ -337,7 +350,8 @@ for scene_idx, startfileidx, endfileidx, calib_idx in scenes:
             
         if display_video:
             imshow('a', display_img);
-            if waitKey(300) == ord('q'):
+            if waitKey(600) == ord('q'):
+                videostopped = True
                 break
         if save_video:
             video.append_data(display_img[:,:,::-1])

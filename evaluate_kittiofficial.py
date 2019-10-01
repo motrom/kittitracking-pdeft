@@ -972,22 +972,19 @@ def evaluate(result_sha,mail):
 if __name__ == "__main__":
     import numpy as np
     from imageio import imread
+    
     from calibs import calib_extrinsics, calib_projections
-    from config import sceneranges
-    from config import calib_map_training as calib_map
-    from analyzeGT import formatForKittiScoreTracking
+    from kittiGT import formatForKittiScoreTracking
+    from runconfigs.example import scenes
+    
     ground_files = '/home/m2/Data/kitti/tracking_ground/training/{:02d}f{:06d}.npy'
     img_files = '/home/m2/Data/kitti/tracking_image/training/{:04d}/{:06d}.png'
     #gt_files = '/home/m2/Data/kitti/tracking_gt/{:04d}.txt'
     inestimatefiles = '/home/m2/Data/kitti/estimates/trackingresultsNoDetect/{:02d}f{:04d}.npy'
     outestfiles = "/home/m2/Data/kitti/estimates/trackingresults000/kitti/{:04d}.txt"
-    scenes = [0,2,3,4,5,6,7,8,9]
     
-    for scene_idx in scenes:
-        startfileidx, endfileidx = sceneranges[scene_idx]
-        calib_idx = calib_map[scene_idx]
+    for scene_idx, startfileidx, endfileidx, calib_idx in scenes:
         calib_extrinsic = calib_extrinsics[calib_idx].copy()
-        calib_extrinsic[2,3] += 1.65
         calib_projection = calib_projections[calib_idx]
         calib_projection = calib_projection.dot(np.linalg.inv(calib_extrinsic))
         imgshape = imread(img_files.format(scene_idx, startfileidx)).shape[:2]

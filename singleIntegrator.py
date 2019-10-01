@@ -27,7 +27,11 @@ from singleTracker import positionDistribution as soPositionDistribution
 from singleTracker import report as soReport
 from singleTracker import nft as sonft
 
-nft = sonft + 11
+# try alternate versions of the tracker
+NOFAKES = False
+NODETECT = False
+
+nft = sonft + 7
 ft_pexist = sonft
 ft_genuity = sonft + 1
 ft_detectability = sonft + 2
@@ -40,8 +44,10 @@ ft_visibility = sonft + 6
 survival_probability = .997
 detectability_steadystate = .99 # average probability of object being detected
 detectability_timestep_ratio = .75 # amount it changes in one second
+if NODETECT:
+    detectability_timestep_ratio = .9999
 exist_object_ratio = .65
-match_nll_offset = -2.
+match_nll_offset = -6.
 
 detectability_pos2pos = 1 - (1 - detectability_steadystate) * detectability_timestep_ratio
 detectability_neg2pos = detectability_steadystate * detectability_timestep_ratio
@@ -81,8 +87,12 @@ def prepObject(sample, pindetectregion):
     sample[ft_visibility] = pindetectregion # easy way to keep this around
     soprep = soPrepObject(sample[:sonft])
     pexist, preal, pdetect = sample[sonft:sonft+3]
-    pmatches = pexist * pindetectregion
-    return soprep + (_nlOdds(pmatches),)
+    pmatches = pexist*pdetect
+    punmatch = 1 - pexist*pdetect*pindetectregion
+    if pmatches < 1e-11: podds = 25.
+    elif punmatch < 1e-11: podds = -25.
+    else: podds = -np.log(pmatches / punmatch)
+    return soprep + (podds,)
 
 """
 weights are for determining which objects to prune or report
@@ -99,7 +109,9 @@ prepObject must have been called at least once this timestep
     so that pindetectregion is updated
 """
 def postObjMissWeight(sample):
-    pexist, preal, pdetect, pindetectregion = sample[[sonft,sonft+1,sonft+2,sonft+8]]
+    pexist, preal, pdetect, pindetectregion = sample[[ft_pexist, ft_genuity,
+                                                      ft_detectability,
+                                                      ft_visibility]]
     eer = pindetectregion
     existdetect = pdetect * eer
     pexist = pexist*(1-existdetect) / (pexist*(1-existdetect) + 1-pexist)
@@ -115,6 +127,8 @@ def prepMeasurement(msmt):
     newmsmtlik = soLikelihoodNewObject(soprep)
     score, newobjectrate = msmt[5:]
     llexist = newobjectrate * exist_object_ratio
+    if NOFAKES:
+        llexist *= score
     llnotexist = (1-exist_object_ratio)
     logodds = np.log(llexist + llnotexist)
     return soprep + (logodds - newmsmtlik + match_nll_offset,)
@@ -145,13 +159,15 @@ def updateMatch(sample, msmt):
     npreviousdetections = sample[ft_detcount]
     meanscore = sample[ft_detscore]
     realscore = msmt[5]
+    if NOFAKES:
+        realscore = 1.
     if npreviousdetections < 10:
         newmeanscore = ((meanscore**2 *npreviousdetections + realscore**2)/(
                                                         npreviousdetections+1))**.5
     else:
         newmeanscore = (meanscore**2 * .9 + realscore**2 * .1)**.5
     newsample[ft_genuity] = newmeanscore / (newmeanscore+
-                                         (1-newmeanscore)*newsample[sonft+11])
+                                         (1-newmeanscore)*newsample[ft_stationaryness])
     newsample[ft_detcount] = npreviousdetections + 1
     newsample[ft_detscore] = newmeanscore
     newsample[ft_detectability] = 1.
@@ -175,6 +191,9 @@ def updateNew(msmt):
     llnotexist = 1 - exist_object_ratio
     newsample[sonft:] = (llexist / (llexist + llnotexist), score, 1., 1, score,
                          1., 1.)
+    if NOFAKES:
+        newsample[sonft:] = (llexist/ (llexist + llnotexist) * msmt[2], 1., 1.,
+                             1., 1., 1., 1.)
     return newsample
 
 def validSample(sample):

@@ -76,12 +76,13 @@ def pointCloud2OcclusionImg(pts, occlusionimg=None):
     return occlusionimg
 
 ### currently slowest part of tracker!
+occlusion_buffer_distance = 3.
 def occlusionImg2Grid(occlusionimg, grid, grnd):
     laserheights = np.zeros(len(lasers))
     for tilex, tiley in grnd2checkgrid:
-        tilenearx = (gridstart[0]+tilex)*gridstep[0]
-        tilelefty = (gridstart[1]+tiley)*gridstep[1]
-        if tiley+gridstart[1] < 0:
+        tilenearx = tilex*gridstep[0] + gridstart[0]
+        tilelefty = tiley*gridstep[1] + gridstart[1]
+        if tiley*gridstep[1] < gridstart[1]:
             tileneary = tilelefty + gridstep[1]
             startangle = np.arctan2(tilelefty, tilenearx)
             endangle = np.arctan2(tilelefty+gridstep[1], tilenearx+gridstep[0])
@@ -103,7 +104,8 @@ def occlusionImg2Grid(occlusionimg, grid, grnd):
             # unclear whether there is occlusion or just nothing
             visibility = partial_visibility_val
         else:
-            visiblepixels = np.sum(subimg > distance-2) + np.sum(subimg == 0)
+            visiblepixels = np.sum(subimg > distance-occlusion_buffer_distance)
+            visiblepixels += np.sum(subimg == 0)
             visibility = visibility_npixels2val*visiblepixels + min_visibility_val
             visibility = min(max_visibility_val, visibility)
         grid[tilex, tiley] = visibility
@@ -118,8 +120,8 @@ def boxTransparent(box, occlusionimg, grnd):
     y = box[1]
     l = .9
     w = .5
-    tilex = int(x/gridstep[0]-gridstart[0])
-    tiley = int(y/gridstep[1]-gridstart[1])
+    tilex = int((x-gridstart[0])/gridstep[0])
+    tiley = int((y-gridstart[1])/gridstep[1])
     grndhere = grnd[tilex, tiley]
     adjustedheight = grndhere[3]-grndhere[0]*x-grndhere[1]*y
     cos = np.cos(box[2])

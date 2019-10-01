@@ -7,8 +7,6 @@ __main__ code plots precision-recall and reports MOTA for selected results files
 
 import numpy as np
 from scipy.optimize import linear_sum_assignment 
-import matplotlib.pyplot as plt
-
 
 def soMetricIoU(boxa, boxb):
     x = boxa[0]-boxb[0]
@@ -64,14 +62,14 @@ def soMetricIoU(boxa, boxb):
     centerpt = np.mean(pts, axis=0)
     ptsangle = np.arctan2(pts[:,1]-centerpt[1],pts[:,0]-centerpt[0])
     pts = pts[np.argsort(ptsangle)]
-    """ Ref: http://stackoverflow.com/questions/24467972/
-        calculate-area-of-polygon-given-x-y-coordinates """
+    # http://stackoverflow.com/questions/24467972/
+    #    calculate-area-of-polygon-given-x-y-coordinates
     area = 0.5*np.abs(np.dot(pts[:,0],np.roll(pts[:,1],1)) -
                       np.dot(pts[:,1],np.roll(pts[:,0],1)))
     return area / (la*wa*4 + lb*wb*4 - area)
 
 
-overlapres = 20
+overlapres = 50
 overlapbox = np.mgrid[:float(overlapres), :float(overlapres)]
 overlapbox += .5
 overlapbox *= 2./overlapres
@@ -191,9 +189,9 @@ class MetricMineApprox():
         self.previousids = {}
         self.previousscores = {}
     def okMetric(self, boxa, boxb):
-        return soMetricIoU(boxa, boxb) > .3
+        return soMetricIoUApprox(boxa, boxb) > .3
     def goodMetric(self, boxa, boxb):
-        return soMetricIoU(boxa, boxb) > .7
+        return soMetricIoUApprox(boxa, boxb) > .7
     def add(self, gt, gtscored, gtdifficulty, gtids, ests, scores, estids):
         ngt = gt.shape[0]
         assert gtscored.shape[0] == ngt
@@ -276,14 +274,15 @@ if __name__ == '__main__':
         evaluate multiple estimates, plot together
         formatForKittiScore gets rid of things kitti didn't annotate
     """
+    import matplotlib.pyplot as plt
     from calibs import calib_extrinsics, calib_projections, view_by_day, imgshapes
-    from runconfig.example import scenes, gt_files, ground_plane_files
+    from runconfigs.exampledesktop import scenes, gt_files, ground_files
     from kittiGT import readGroundTruthFileTracking, formatForKittiScoreTracking
     
     
     nframesahead = 0
-    estfiles = '/home/m2/Data/kitti/{:s}/{:02d}f{:04d}.npy'
-    tests = [('results/example', 'pdeft w/ PRCNN', 'b')]
+    estfiles = '/home/motrom/Downloads/kitti_devkit/{:s}/{:02d}f{:04d}.npy'
+    tests = [('testestimates', 'pdeft w/ PRCNN', 'b')]
     
     results = []
     motas = []
@@ -295,7 +294,6 @@ if __name__ == '__main__':
             # run some performance metrics on numpy-stored results
             startfile += nframesahead
             calib_extrinsic = calib_extrinsics[calib_idx].copy()
-            view_angle = view_by_day[calib_idx]
             calib_projection = calib_projections[calib_idx]
             calib_projection = calib_projection.dot(np.linalg.inv(calib_extrinsic))
             imgshape = imgshapes[calib_idx]
@@ -304,14 +302,16 @@ if __name__ == '__main__':
             metric.newScene()
             
             for fileidx in range(startfile, endfile):
-                ground = np.load(ground_plane_files.format(scene_idx, fileidx))
+                ground = np.load(ground_files.format(scene_idx, fileidx))
+                #ground[:,:,3] -= 1.65 # TEMP!!!
                 
                 ests = np.load(estfiles.format(testfolder, scene_idx, fileidx))
                 estids = ests[:,6].astype(int)
                 scores = ests[:,5]
                 ests = ests[:,:5]
                 rede = formatForKittiScoreTracking(ests, estids, scores, fileidx,
-                                    ground, calib_projection, imgshape, gtdontcares)
+                                                   ground, calib_projection, imgshape,
+                                                   gtdontcares, kitti_format=False)
                 ests = np.array([redd[0] for redd in rede])
                 scores = np.array([redd[2] for redd in rede])
                 estids = np.array([redd[1] for redd in rede])
