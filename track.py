@@ -115,7 +115,7 @@ for scene_idx, startfileidx, endfileidx, calib_idx in scenes:
         data = data.dot(calib_extrinsic[:3,:3].T) + calib_extrinsic[:3,3]
         selfposT = selfpos_transforms[fileidx][[0,1,3],:][:,[0,1,3]]
         ground = np.load(ground_files.format(scene_idx, fileidx))
-        ground[:,:,3] -= 1.65 ### TEMP !!!!
+        #ground[:,:,3] -= 1.65 ### TEMP !!!!
         
         # propagate objects
         for objidx in range(n_objects):
@@ -158,7 +158,6 @@ for scene_idx, startfileidx, endfileidx, calib_idx in scenes:
         # simulate only performing detection in certain regions
         # would be difficult to actually implement this for many detectors
         # but easy for VoxelJones detector
-        
         objecthypoprobabilities = np.ones(n_objects)
         tiles2detectgrid = subselectDetector(objects, objecthypoprobabilities,
                                              data, ground,
@@ -182,10 +181,11 @@ for scene_idx, startfileidx, endfileidx, calib_idx in scenes:
         # get measurements
         msmts = detect(scene_idx, fileidx)
         # add context used by integrator -- aka occupancy
-        # TODO remove boxTransparent
+        # remove transparent msmts actually improves detectors including PointRCNN
+        # but admittedly makes comparison less fair b.c. it is not part of tracking
         msmtsnew = []
         for msmt in msmts:
-            if boxTransparent(msmt, occlusionimg, ground):
+            if True:#boxTransparent(msmt, occlusionimg, ground):
                 tilex, tiley = floor((msmt[:2]-gridstart)/gridstep).astype(int)
                 if tiles2detectgrid[tilex,tiley]:
                     msmtsnew.append(np.append(msmt, occupancy[tilex, tiley]))
@@ -265,8 +265,6 @@ for scene_idx, startfileidx, endfileidx, calib_idx in scenes:
         reportedlabels = labeler.add(updatepairs[prunedpairs], reportedidxs)
         assert np.all(np.diff(np.sort(reportedlabels))) # all unique labels
         fullreports = np.column_stack((reportedobjects, reportedscores, reportedlabels))
-#        fullreports = np.concatenate((reportedobjects, reportedscores[:,None],
-#                                      reportedlabels[:,None]), axis=1)
         
         if save_estimates:
             np.save(estimate_files.format(scene_idx, fileidx), fullreports)
