@@ -1,8 +1,13 @@
-#!/usr/bin/env python2
 # -*- coding: utf-8 -*-
 """
 tools for evaluation
 __main__ code plots precision-recall and reports MOTA for selected results files
+
+why not just use py-motmetrics?
+because that code doesn't check different score thresholds -- you have to pick
+one in advance
+this code compares methods for various false-negative/false-positive tradeoffs
+and uses the optimal score cutoff (for each method) when reporting MOTA
 """
 
 import numpy as np
@@ -69,7 +74,7 @@ def soMetricIoU(boxa, boxb):
     return area / (la*wa*4 + lb*wb*4 - area)
 
 
-overlapres = 50
+overlapres = 10
 overlapbox = np.mgrid[:float(overlapres), :float(overlapres)]
 overlapbox += .5
 overlapbox *= 2./overlapres
@@ -275,20 +280,19 @@ if __name__ == '__main__':
         formatForKittiScore gets rid of things kitti didn't annotate
     """
     import matplotlib.pyplot as plt
-    from calibs import calib_extrinsics, calib_projections, view_by_day, imgshapes
-    from runconfigs.exampledesktop import scenes, gt_files, ground_files
+    from calibs import calib_extrinsics, calib_projections, imgshapes
+    from runconfigs.example import scenes, gt_files, ground_files
     from kittiGT import readGroundTruthFileTracking, formatForKittiScoreTracking
     
-    
     nframesahead = 0
-    estfiles = '/home/motrom/Downloads/kitti_devkit/{:s}/{:02d}f{:04d}.npy'
-    tests = [('testestimates', 'pdeft w/ PRCNN', 'b')]
+    estfiles = '{:s}/{:02d}f{:04d}.npy'
+    tests = [('/home/m2/Data/kitti/estimates/gitresultPRC', 'pdeft w/ PRCNN', 'b')]
     
     results = []
     motas = []
     
     for testfolder, testname, testcolor in tests:
-        metric = MetricMineApprox()
+        metric = MetricMine()#Approx()
         
         for scene_idx, startfile, endfile, calib_idx in scenes:
             # run some performance metrics on numpy-stored results
@@ -303,7 +307,7 @@ if __name__ == '__main__':
             
             for fileidx in range(startfile, endfile):
                 ground = np.load(ground_files.format(scene_idx, fileidx))
-                #ground[:,:,3] -= 1.65 # TEMP!!!
+                ground[:,:,3] -= 1.65 # TEMP!!!
                 
                 ests = np.load(estfiles.format(testfolder, scene_idx, fileidx))
                 estids = ests[:,6].astype(int)
@@ -330,7 +334,8 @@ if __name__ == '__main__':
         results.append((testname, restest, testcolor))
         motas.append(metric.calcMOTA())
 
-
+    print("MOTAs")
+    print(motas)
 
     fig, axeses = plt.subplots(1, 3, figsize=(12., 3.))
     plt1, plt2, plt3 = axeses.flat
@@ -348,7 +353,5 @@ if __name__ == '__main__':
         plt1.plot(result[:,0], result[:,1], color, label=testname)
         plt2.plot(result[:,0], result[:,2], color, label=testname)
         plt3.plot(result[:,0], result[:,3], color, label=testname)
-    #plt3.legend(loc='center right')
     plt3.legend(bbox_to_anchor = (1.04, 1), loc="upper left")
-    #plt1.legend(bbox_to_anchor = (0., -0.05), loc="upper left", ncol=4)
     plt.show()
