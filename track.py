@@ -9,7 +9,8 @@ tracking details:
 
 from runconfigs.example import lidar_files, img_files, gt_files, oxt_files,\
                                       ground_files, save_estimates, estimate_files,\
-                                      display_video, save_video, video_file, scenes
+                                      display_video, save_video, video_file, scenes,\
+                                      predict_n_frames
 
 import numpy as np
 from scipy.optimize import linear_sum_assignment
@@ -108,7 +109,7 @@ for scene_idx, startfileidx, endfileidx, calib_idx in scenes:
     objects[:] = 0.
     labeler.reset()
     
-    for fileidx in range(startfileidx, endfileidx):
+    for fileidx in range(startfileidx, endfileidx-predict_n_frames):
         # get data for this timestep
         data = np.fromfile(lidar_files.format(scene_idx, fileidx),
                            dtype=np.float32).reshape((-1,4))[:,:3]
@@ -256,6 +257,19 @@ for scene_idx, startfileidx, endfileidx, calib_idx in scenes:
         for objidx in range(n_objects):
             reportscore, reportobj = soReport(objects[objidx])
             if reportscore > report_score_cutoff:
+                futureobj = objects[objidx].copy()
+                # predict motion
+                # hack, clamp down uncertainty in angle var
+                futureobj[21:28] /= 2.
+                futureobj[9:56:7] /= 2.
+                for futureidx in range(fileidx+1, fileidx+predict_n_frames+1):
+                    # option 1: use correct future self-motion
+                    nextselfT = selfpos_transforms[futureidx][[0,1,3],:][:,[0,1,3]]
+                    ## option 2: assume constant speed and angvel from current info
+                    #nextselfT = selfposT
+                    soPredict(futureobj)
+                    soReOrient(futureobj, nextselfT)
+                reportscorefuture, reportobj = soReport(futureobj)
                 reportedidxs.append(objidx)
                 reportedobjects.append(reportobj)
                 reportedscores.append(reportscore)
@@ -267,7 +281,8 @@ for scene_idx, startfileidx, endfileidx, calib_idx in scenes:
         fullreports = np.column_stack((reportedobjects, reportedscores, reportedlabels))
         
         if save_estimates:
-            np.save(estimate_files.format(scene_idx, fileidx), fullreports)
+            np.save(estimate_files.format(scene_idx, fileidx+predict_n_frames),
+                    fullreports)
         
         # view
         if display_video or save_video:

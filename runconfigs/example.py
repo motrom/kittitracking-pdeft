@@ -14,11 +14,12 @@ oxt_files = '/home/m2/Data/kitti/oxts/{:04d}.txt'
 ground_files = '/home/m2/Data/kitti/tracking_ground/training/{:02d}f{:06d}.npy'
 
 save_estimates = True
-estimate_files = '/home/m2/Data/kitti/estimates/trackresultsPRC/{:02d}f{:04d}.npy'
+estimate_files = '/home/m2/Data/kitti/estimates/gitresult2/{:02d}f{:04d}.npy'
+predict_n_frames = 10 # saved predicted object positions #frames ahead (0=no prediction)
 
-display_video = True
+display_video = False
 save_video = False
-video_file = 'results.mp4'
+video_file = '/home/m2/Data/kitti/videos/results.mp4'
 img_files = '/home/m2/Data/kitti/tracking_image/training/{:04d}/{:06d}.png'
 
 """

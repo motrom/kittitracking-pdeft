@@ -284,7 +284,7 @@ if __name__ == '__main__':
     from runconfigs.example import scenes, gt_files, ground_files
     from kittiGT import readGroundTruthFileTracking, formatForKittiScoreTracking
     
-    nframesahead = 0
+    predict_n_frames = 10
     estfiles = '{:s}/{:02d}f{:04d}.npy'
     tests = [('/home/m2/Data/kitti/estimates/gitresultPRC', 'pdeft w/ PRCNN', 'b')]
     
@@ -296,7 +296,7 @@ if __name__ == '__main__':
         
         for scene_idx, startfile, endfile, calib_idx in scenes:
             # run some performance metrics on numpy-stored results
-            startfile += nframesahead
+            startfile += predict_n_frames
             calib_extrinsic = calib_extrinsics[calib_idx].copy()
             calib_projection = calib_projections[calib_idx]
             calib_projection = calib_projection.dot(np.linalg.inv(calib_extrinsic))
@@ -307,7 +307,7 @@ if __name__ == '__main__':
             
             for fileidx in range(startfile, endfile):
                 ground = np.load(ground_files.format(scene_idx, fileidx))
-                ground[:,:,3] -= 1.65 # TEMP!!!
+                #ground[:,:,3] -= 1.65 # TEMP!!!
                 
                 ests = np.load(estfiles.format(testfolder, scene_idx, fileidx))
                 estids = ests[:,6].astype(int)

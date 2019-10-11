@@ -17,6 +17,7 @@ ground_files = ('/home/motrom/Downloads/kitti_devkit/tracking/trackingground/'+
 
 save_estimates = True
 estimate_files = '/home/motrom/Downloads/kitti_devkit/testestimates/{:02d}f{:04d}.npy'
+predict_n_frames = 10 # saved predicted object positions #frames ahead (0=no prediction)
 
 display_video = False
 save_video = False
