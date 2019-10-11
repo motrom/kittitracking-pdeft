@@ -7,12 +7,11 @@ tracking details:
         reality determined in first step via score
 """
 
-from runconfigs.exampledesktop import lidar_files, img_files, gt_files, oxt_files,\
+from runconfigs.example import lidar_files, img_files, gt_files, oxt_files,\
                                       ground_files, save_estimates, estimate_files,\
                                       display_video, save_video, video_file, scenes
 
 import numpy as np
-import numba as nb
 from scipy.optimize import linear_sum_assignment
 if display_video or save_video:
     from imageio import imread, get_writer
@@ -76,26 +75,6 @@ occupancy_move_buffer = 1.2 # meters
 occupancydummy = np.zeros((gridlen[0]+occupancy_mixer.shape[0]-1,
                            gridlen[1]+occupancy_mixer.shape[1]-1))
 
-## looks for empty matrices
-emptydummy = np.zeros(gridlen+2, dtype=np.uint16)
-emptymixer = np.array(((1,1,1),(1,1,1),(0,0,0)), dtype=np.uint16)
-nabove3 = np.zeros(gridlen, dtype=np.uint16)
-@nb.njit(nb.void(nb.f8[:,:], nb.f8[:,:,:], nb.u2[:,:]))
-def _emptyTilesNb(data, ground, nabove):
-    nabove[:] = 0
-    for ptidx in range(data.shape[0]):
-        pt = data[ptidx]
-        tilex = int((pt[0]-gridstart[0])/gridstep[0])
-        tiley = int((pt[1]-gridstart[1])/gridstep[1])
-        if (tilex>=0 and tiley>=0 and tilex<gridlen[0] and tiley<gridlen[1]):
-            height = np.dot(pt, ground[tilex, tiley,:3]) - ground[tilex,tiley,3]
-            if height > .25:
-                nabove[tilex,tiley] += 1
-def findEmptyTiles(data, ground):
-    _emptyTilesNb(data,ground,nabove3)
-    mixGrid(nabove3, emptymixer, 10, emptydummy)
-    return nabove3 < 2
-
 
 # initialize state objects
 objects = np.zeros((n_objects, n_ft))
@@ -136,7 +115,7 @@ for scene_idx, startfileidx, endfileidx, calib_idx in scenes:
         data = data.dot(calib_extrinsic[:3,:3].T) + calib_extrinsic[:3,3]
         selfposT = selfpos_transforms[fileidx][[0,1,3],:][:,[0,1,3]]
         ground = np.load(ground_files.format(scene_idx, fileidx))
-        #ground[:,:,3] -= 1.65 ### TEMP !!!!
+        ground[:,:,3] -= 1.65 ### TEMP !!!!
         
         # propagate objects
         for objidx in range(n_objects):
@@ -179,10 +158,11 @@ for scene_idx, startfileidx, endfileidx, calib_idx in scenes:
         # simulate only performing detection in certain regions
         # would be difficult to actually implement this for many detectors
         # but easy for VoxelJones detector
-        empty = findEmptyTiles(data, ground)
+        
         objecthypoprobabilities = np.ones(n_objects)
         tiles2detectgrid = subselectDetector(objects, objecthypoprobabilities,
-                                             occupancy, visibility, empty,
+                                             data, ground,
+                                             occupancy, visibility,
                                              subselect_detector_ratio)
         visibility *= tiles2detectgrid
     
@@ -300,11 +280,12 @@ for scene_idx, startfileidx, endfileidx, calib_idx in scenes:
             plotimg2 = plotImgKitti(view_angle)
             # shade tiles chosen for detection
             for tilex, tiley in np.ndindex(*gridlen):
-                if not tiles2detectgrid[tilex,tiley] or empty[tilex,tiley]: continue
-                tilecenterx = (tilex+.5)*gridstep[0] + gridstart[0]
-                tilecentery = (tiley+.5)*gridstep[1] + gridstart[1]
-                addRect2KittiImg(plotimg1, (tilecenterx, tilecentery, 0., 1.5, 1.5),
-                                 np.array((30., 30., 30., .2)))
+                if tiles2detectgrid[tilex,tiley]:
+                    tilecenterx = (tilex+.5)*gridstep[0] + gridstart[0]
+                    tilecentery = (tiley+.5)*gridstep[1] + gridstart[1]
+                    addRect2KittiImg(plotimg1,
+                                     (tilecenterx, tilecentery, 0, 1.5, 1.5),
+                                     np.array((30., 30., 30., .2)))
             # add ground truth
             for gtobj in gt:
                 box = np.array(gtobj['box'])
@@ -325,18 +306,18 @@ for scene_idx, startfileidx, endfileidx, calib_idx in scenes:
                 if tilecenterx < 1 or tilecenterx > 58 or abs(tilecentery) > 28:
                     continue
                 color = 255.9*(1-occupancy[tilex, tiley])
-                #color = 255.9*visibility[tilex,tiley]#empty[tilex,tiley]#
+                #color = 255.9*visibility[tilex,tiley]
                 addRect2KittiImg(plotimg2, (tilecenterx, tilecentery, 0., 1.5, 1.5),
                                  np.array((color*.2, color*.2, color*.2, .2)))
-            for report in fullreports:
-                hue = report[6]%12/12.
+            for obj in fullreports:
+                hue = obj[6]%12/12.
                 hue = (hue*5/6 + 9./12) % 1.
-                shade = (1. if report[5] > .7 else
-                         .45 if report[5] > .3 else
-                         .05 if report[5] > .1 else
+                shade = (1. if obj[5] > .7 else
+                         .45 if obj[5] > .3 else
+                         .05 if obj[5] > .1 else
                          0.)
                 color = hsv2Rgba(hue, .9, 1., shade)
-                plotRectangleEdges(plotimg2, report[:5], color)
+                plotRectangleEdges(plotimg2, obj[:5], color)
             # put the plot on top of the camera image to view, display
             plotimg1 = np.minimum((plotimg1[:,:,:3]/plotimg1[:,:,3:]),
                                   255).astype(np.uint8)
