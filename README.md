@@ -14,7 +14,7 @@ Each vehicle is tracked as a 2D rectangle (bird's eye view) with a simple bicycl
 4. numba (only used to speed up some functions, can be disabled easily if you don't want to install numba)
 
 ## Input
-Detections from VoxelJones are available at https://utexas.box.com/shared/static/ptt0hrs7aekno22i7valqypqv3osq862.zip. Detection formatting is handled by presavedDetector.py, the easiest way to handle new input would be to replace this code with your own.  
+Detections from PointRCNN and VoxelJones are available at https://utexas.box.com/s/kabrfde65me39wovlwextyryr4fko3tp and https://utexas.box.com/shared/static/ptt0hrs7aekno22i7valqypqv3osq862.zip. Detection formatting is handled by presavedSensorXXX.py, the easiest way to handle new input would be make a new sensor file like these.  
 The tracker also uses Kitti's lidar and positioning data. For visualization and performance evaluation, it needs the left images and the kitti annotation text files. All data files are specified by a file in runconfigs/ (currently there is an example.py) using `somestring.format(scene_number)` or `somestring.format(scene_number, frame_number)`, so make appropriate modifications to each `somestring` for your file organization.  
 Finally, the code currently handles the first ten scenes from the kitti training set. I will expand it to all scenes from the training and testing set soon... only minor details like the length of each scene are missing.
 
